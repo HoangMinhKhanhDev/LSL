@@ -1,0 +1,21 @@
+{
+  "dimension": 16,
+  "basis": {
+    "neuromedical": [1.0, 0.8, 0.7, 0.6, 0.2, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    "language": [0.8, 1.0, 0.7, 0.5, 0.2, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    "care": [0.5, 0.7, 1.0, 0.6, 0.2, 0.1, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    "learning": [0.7, 0.4, 0.4, 1.0, 0.3, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    "body": [0.0, 0.0, 0.0, 0.0, 1.0, 0.7, 0.6, 0.2, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    "environment": [0.0, 0.0, 0.0, 0.0, 0.1, 0.2, 0.3, 1.0, 0.8, 0.7, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+    "object": [0.0, 0.0, 0.0, 0.0, 0.0, 0.1, 0.2, 0.2, 0.3, 0.4, 1.0, 0.8, 0.6, 0.0, 0.0, 0.0]
+  },
+  "groups": {
+    "neuromedical": ["stroke", "brain", "aphasia", "damage", "injury", "neuron", "neurons", "synapse", "synapses", "cortex", "neural", "plasticity"],
+    "language": ["language", "speech", "speaking", "reading", "writing", "communication", "comprehension", "production", "words", "recovery"],
+    "care": ["therapy", "doctor", "patient", "patients", "treatment", "medication", "examined", "prescribed", "session", "sessions"],
+    "learning": ["memory", "learning", "learn", "patterns", "cognitive", "thinking", "attention", "perception", "processing", "activity"],
+    "body": ["heart", "blood", "pressure", "muscle", "diabetes", "sugar", "flow"],
+    "environment": ["river", "water", "sky", "park", "bed", "worldwide"],
+    "object": ["table", "ball", "mouse", "stranger", "fish", "meat"]
+  }
+}
