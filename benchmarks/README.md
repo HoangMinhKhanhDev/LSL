@@ -141,3 +141,6 @@ Corpus checkpoint training:
 python benchmarks/train_lsl_corpus.py --dataset tinystories --max-tokens 1000000
 python lsl_chat.py --checkpoint checkpoints/lsl_tinystories.json
 ```
+
+If the default checkpoint is absent, `lsl_chat.py` bootstraps a small local
+TinyStories checkpoint before entering the chat loop.

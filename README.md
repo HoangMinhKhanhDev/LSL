@@ -120,7 +120,9 @@ Train and save a single LSLCoreModel checkpoint on a real corpus:
 python benchmarks/train_lsl_corpus.py --dataset tinystories --max-tokens 1000000
 ```
 
-Then run the interactive demo:
+Then run the interactive demo. On a fresh checkout, `python lsl_chat.py` also
+bootstraps a small local TinyStories checkpoint automatically if this file is
+missing:
 
 ```bash
 python lsl_chat.py --checkpoint checkpoints/lsl_tinystories.json
