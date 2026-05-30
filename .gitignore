@@ -15,5 +15,6 @@ dist/
 tmp/
 temp/
 benchmark_outputs/
+results/
 *.out
 *.err

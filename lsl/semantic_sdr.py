@@ -25,6 +25,8 @@ from pathlib import Path
 import numpy as np
 from typing import Dict, List, Optional, Tuple
 
+from .sparse_cooccurrence import build_sparse_cooccurrence, sparse_pmi_embedding, approximate_skipgram_embedding
+
 
 # ---------------------------------------------------------------------------
 # Mini Word2Vec via PMI + SVD (no external deps)
@@ -133,6 +135,9 @@ class SemanticSDREncoder:
         hidden_dim: int = 1024,
         embedding_dim: int = 64,
         use_pretrained: bool = False,
+        # Phase 4: sparse mode for large vocabularies
+        use_sparse: bool = False,
+        sparse_threshold: int = 5000,
     ):
         self.vocab_size = int(vocab_size)
         self.sdr_dim    = int(sdr_dim)
@@ -141,6 +146,8 @@ class SemanticSDREncoder:
         self.sparsity   = float(sparsity)
         self.k          = max(1, int(self.sdr_dim * self.sparsity))
         self.use_pretrained = bool(use_pretrained)
+        self.use_sparse = bool(use_sparse) if vocab_size >= sparse_threshold else False
+        self.sparse_threshold = int(sparse_threshold)
 
         # Legacy compat: hidden_dim alias
         self.hidden_dim = self.sdr_dim
@@ -187,8 +194,9 @@ class SemanticSDREncoder:
         """
         if verbose:
             total = sum(len(s) for s in token_sequences)
+            mode = "sparse" if self.use_sparse else "dense"
             print(f"[SemanticSDR] fit(): {len(token_sequences)} seqs, "
-                  f"{total} tokens, vocab={self.vocab_size}")
+                  f"{total} tokens, vocab={self.vocab_size}, mode={mode}")
 
         # Flatten all sequences into one long stream
         flat: List[int] = []
@@ -201,8 +209,16 @@ class SemanticSDREncoder:
             return self
 
         # Build co-occurrence and extract PMI embeddings
-        C = _build_cooccurrence(flat, self.vocab_size, window=window)
-        emb = _pmi_embedding(C, self.embed_dim, seed=self.seed, shift=2.0)
+        # Use sparse mode for large vocabularies (Phase 4)
+        if self.use_sparse:
+            if verbose:
+                print("[SemanticSDR] Using sparse co-occurrence for large vocabulary")
+            rows, cols, vals = build_sparse_cooccurrence(flat, self.vocab_size, window=window)
+            emb = sparse_pmi_embedding(rows, cols, vals, self.vocab_size,
+                                       self.embed_dim, seed=self.seed, shift=2.0)
+        else:
+            C = _build_cooccurrence(flat, self.vocab_size, window=window)
+            emb = _pmi_embedding(C, self.embed_dim, seed=self.seed, shift=2.0)
 
         self._embeddings = emb.astype(np.float32)
         self._fitted = True
@@ -318,6 +334,43 @@ class SemanticSDREncoder:
     def load_embeddings_from_gensim(self, model_path: str, vocab: Dict[str, int]):
         """Legacy compat: no-op (gensim not used, use fit() instead)."""
         pass
+
+    def load_embedding_matrix(
+        self,
+        embeddings: np.ndarray,
+        normalize: bool = True,
+    ) -> int:
+        """Load an offline semantic prior matrix.
+
+        This is the scale-oriented path for semantic SDR: an external/offline
+        semantic source supplies dense word vectors, and the encoder converts
+        them into sparse binary SDRs through the fixed random projection.
+        """
+        matrix = np.asarray(embeddings, dtype=np.float32)
+        if matrix.ndim != 2:
+            raise ValueError("embeddings must be a 2D array")
+        if matrix.shape[0] != self.vocab_size:
+            raise ValueError(
+                f"expected {self.vocab_size} rows, got {matrix.shape[0]}"
+            )
+
+        if matrix.shape[1] < self.embed_dim:
+            pad = np.zeros(
+                (self.vocab_size, self.embed_dim - matrix.shape[1]),
+                dtype=np.float32,
+            )
+            matrix = np.concatenate([matrix, pad], axis=1)
+        elif matrix.shape[1] > self.embed_dim:
+            matrix = matrix[:, :self.embed_dim]
+
+        if normalize:
+            norms = np.linalg.norm(matrix, axis=1, keepdims=True) + 1e-9
+            matrix = matrix / norms
+
+        self._embeddings = matrix.astype(np.float32, copy=False)
+        self._fitted = True
+        self._cache.clear()
+        return self.vocab_size
 
     def load_builtin_embeddings(
         self,

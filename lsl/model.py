@@ -13,10 +13,24 @@ from .synapse import LivingSynapseLayer
 from .router import DynamicCircuitRouter
 from .neuromod import Neuromodulator
 from .memory import EpisodicBuffer
+from .long_context import LongContextMemory
+from .reasoning import RelationMemory, RoleBindingMemory
 from .ssm import LivingSSM
 from .utils import softmax, one_hot
 from .sdr import SDREncoder, sparsity_ratio, log2_capacity
 from .semantic_sdr import SemanticSDREncoder
+
+
+def sparsify(x, k_ratio=0.02):
+    """Keep only top-k activations to maintain sparsity."""
+    k = max(1, int(len(x) * k_ratio))
+    if k >= len(x):
+        return x
+    threshold = np.partition(np.abs(x), -k)[-k]
+    mask = np.abs(x) >= threshold
+    result = x.copy()
+    result[~mask] = 0.0
+    return result
 
 
 class _LocalTransitionPredictor:
@@ -61,7 +75,15 @@ class LivingSynapseLM:
                  use_predictive_coding=False, theta=0.0,
                  use_semantic_sdr=False, semantic_hidden_dim=1000,
                  embedding_dim=300, use_pretrained=False,
-                 use_sparse_computation=False):
+                 use_sparse_computation=False,
+                 use_sparse_memory=False,
+                 use_role_binding=False,
+                 use_hierarchical_routing=False,
+                 memory_candidate_cap=64,
+                 use_long_context_memory=False,
+                 long_context_capacity=131072,
+                 long_context_strength=10.0,
+                 long_context_confidence_threshold=0.55):
         self.vocab_size = int(vocab_size)
         self.hidden_dim = int(semantic_hidden_dim if use_semantic_sdr else hidden_dim)
         self.use_sdr = bool(use_sdr)
@@ -72,6 +94,13 @@ class LivingSynapseLM:
         self.semantic_hidden_dim = int(semantic_hidden_dim)
         self.embedding_dim = int(embedding_dim)
         self.use_sparse_computation = bool(use_sparse_computation)
+        self.use_sparse_memory = bool(use_sparse_memory)
+        self.use_role_binding = bool(use_role_binding)
+        self.use_hierarchical_routing = bool(use_hierarchical_routing)
+        self.memory_candidate_cap = int(memory_candidate_cap)
+        self.use_long_context_memory = bool(use_long_context_memory)
+        self.long_context_strength = float(long_context_strength)
+        self.long_context_confidence_threshold = float(long_context_confidence_threshold)
 
         self.embed = LivingSynapseLayer(vocab_size, self.hidden_dim,
                                         slow_init=slow_init, seed=seed)
@@ -89,7 +118,19 @@ class LivingSynapseLM:
 
         self.router = DynamicCircuitRouter(self.hidden_dim, k_ratio=k_ratio)
         self.modulator = Neuromodulator()
-        self.episodic = EpisodicBuffer(capacity=256)
+        self.episodic = EpisodicBuffer(capacity=256, candidate_cap=self.memory_candidate_cap)
+        self.long_context = (
+            LongContextMemory(
+                capacity=long_context_capacity,
+                vocab_size=vocab_size,
+                candidate_cap=self.memory_candidate_cap,
+                seed=seed + 31,
+            )
+            if self.use_long_context_memory
+            else None
+        )
+        self.relation_memory = RelationMemory()
+        self.role_binding_memory = RoleBindingMemory() if self.use_role_binding else None
         self.global_state = np.zeros(self.hidden_dim, dtype=np.float32)
         self.prev_h_ssm = np.zeros(self.hidden_dim, dtype=np.float32)
         self.prev_h_rec = np.zeros(self.hidden_dim, dtype=np.float32)
@@ -184,6 +225,8 @@ class LivingSynapseLM:
 
         mask = self.router.gate(h, self.global_state)
         h_gated = h * mask
+        if self.use_sparse_computation:
+            h_gated = sparsify(h_gated, k_ratio=0.02)
         self._last_h_gated = h_gated.copy()
 
         if self.use_predictive_coding:
@@ -196,7 +239,7 @@ class LivingSynapseLM:
             e_emb = np.zeros_like(h_gated)
             e_emb_supp = h_gated
 
-        h_ssm = self.ssm.forward(h_gated)
+        h_ssm = self.ssm.forward(h_gated, use_sparse=self.use_sparse_computation)
         if self.use_sdr and self.sdr_encoder is not None and not self.use_semantic_sdr:
             self._last_h_attn_pre = h_ssm.copy()
             h_ssm = self.sdr_encoder.encode(h_ssm)
@@ -251,6 +294,16 @@ class LivingSynapseLM:
         logits = self.output.forward(h2, use_sparse=self.use_sparse_computation)
         if self.use_predictive_coding:
             logits = logits + self._association_logits(token_id)
+        if self.long_context is not None:
+            remembered, confidence = self.long_context.predict_next(
+                token_id,
+                vocab_size=self.vocab_size,
+                return_confidence=True,
+                update_context=(target_id is None),
+            )
+            if remembered is not None and 0 <= int(remembered) < self.vocab_size:
+                if confidence >= self.long_context_confidence_threshold:
+                    logits[int(remembered)] += self.long_context_strength * min(1.0, float(confidence))
         return logits
 
     def relation_probability(self, source_id, effect_id, candidate_ids=None, top_k=3):
@@ -330,6 +383,8 @@ class LivingSynapseLM:
 
         if store:
             self.episodic.add((int(token_id), int(target_id)))
+            if self.long_context is not None:
+                self.long_context.observe_transition(token_id, target_id, vocab_size=self.vocab_size)
         self.step_count += 1
         return {
             "prediction_error": float(prediction_err),
@@ -362,6 +417,8 @@ class LivingSynapseLM:
         self.prev_h_ssm[:] = 0.0
         self.prev_h_rec[:] = 0.0
         self.recent_tokens.clear()
+        if self.long_context is not None:
+            self.long_context.reset_state()
 
     def reset_live(self):
         for layer in (self.embed, self.recurrent, self.output,

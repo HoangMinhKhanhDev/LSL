@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LSL Architecture Map</title>
+  <style>
+    :root {
+      --bg: #f7f9fc;
+      --ink: #172026;
+      --muted: #5a6670;
+      --line: #d6dde5;
+      --panel: #ffffff;
+      --teal: #0f766e;
+      --green: #15803d;
+      --amber: #b45309;
+      --red: #b91c1c;
+      --cyan: #0369a1;
+      --violet: #6d28d9;
+      --shadow: 0 12px 35px rgba(23, 32, 38, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+
+    main {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 40px 0 64px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: 1.05fr 0.95fr;
+      gap: 28px;
+      align-items: center;
+      min-height: 78vh;
+      padding: 24px 0 36px;
+    }
+
+    h1, h2, h3, p {
+      margin: 0;
+    }
+
+    h1 {
+      max-width: 760px;
+      font-size: clamp(42px, 7vw, 88px);
+      line-height: 0.95;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      font-size: clamp(26px, 3vw, 40px);
+      line-height: 1.05;
+      margin-bottom: 16px;
+    }
+
+    h3 {
+      font-size: 18px;
+      line-height: 1.2;
+      margin-bottom: 8px;
+    }
+
+    p {
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 1.65;
+    }
+
+    .lead {
+      max-width: 760px;
+      margin-top: 22px;
+      font-size: 19px;
+      color: #34434e;
+    }
+
+    .hero-panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+      border-radius: 8px;
+      padding: 24px;
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+      background: #fbfcfe;
+    }
+
+    .metric strong {
+      display: block;
+      font-size: 24px;
+      line-height: 1;
+      margin-bottom: 8px;
+    }
+
+    .metric span {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    section {
+      padding: 48px 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .diagram-shell {
+      margin-top: 22px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    svg {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    .module-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 22px;
+    }
+
+    .module {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      min-height: 178px;
+    }
+
+    .module .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: #ffffff;
+      border-radius: 999px;
+      padding: 5px 9px;
+      font-size: 12px;
+      margin-bottom: 12px;
+      background: var(--teal);
+    }
+
+    .tag.green { background: var(--green); }
+    .tag.amber { background: var(--amber); }
+    .tag.red { background: var(--red); }
+    .tag.cyan { background: var(--cyan); }
+    .tag.violet { background: var(--violet); }
+
+    .split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 18px;
+      margin-top: 20px;
+    }
+
+    .band {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 22px;
+    }
+
+    .steps {
+      display: grid;
+      gap: 10px;
+      margin-top: 18px;
+      counter-reset: step;
+    }
+
+    .step {
+      display: grid;
+      grid-template-columns: 40px 1fr;
+      gap: 12px;
+      align-items: start;
+      padding: 14px;
+      background: #ffffff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .step::before {
+      counter-increment: step;
+      content: counter(step);
+      display: grid;
+      place-items: center;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: #e8f3f1;
+      color: var(--teal);
+      font-weight: 700;
+    }
+
+    .code {
+      margin-top: 18px;
+      padding: 18px;
+      border-radius: 8px;
+      background: #101418;
+      color: #d9f99d;
+      overflow-x: auto;
+      font-family: "Cascadia Mono", "SFMono-Regular", Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      display: table;
+    }
+
+    th, td {
+      text-align: left;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    th {
+      background: #edf3f8;
+      color: #2d3b45;
+      font-weight: 700;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .ok {
+      color: var(--green);
+      font-weight: 700;
+    }
+
+    .warn {
+      color: var(--amber);
+      font-weight: 700;
+    }
+
+    .footer-note {
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 24px;
+    }
+
+    @media (max-width: 900px) {
+      .hero,
+      .split {
+        grid-template-columns: 1fr;
+      }
+
+      .hero {
+        min-height: auto;
+      }
+
+      .module-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    @media (max-width: 620px) {
+      main {
+        width: min(100% - 20px, 1180px);
+        padding-top: 18px;
+      }
+
+      .module-grid,
+      .metric-grid {
+        grid-template-columns: 1fr;
+      }
+
+      th, td {
+        padding: 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="hero">
+      <div>
+        <h1>LSL Architecture Map</h1>
+        <p class="lead">
+          Living Synapse Language Model là một kiến trúc ngôn ngữ CPU-only dựa trên biểu diễn thưa,
+          học online cục bộ, predictive coding, cortical columns, long-context memory và reasoning workspace.
+          Mục tiêu không phải mô phỏng Transformer, mà là tạo một đường suy luận không attention matrix,
+          không backprop và có chi phí theo token gần hằng số.
+        </p>
+      </div>
+      <aside class="hero-panel" aria-label="Tóm tắt kết quả strict hiện tại">
+        <h2>Strict Snapshot</h2>
+        <p>Các số dưới đây lấy từ strict gate và benchmark Phase 9 hiện tại trong repo.</p>
+        <div class="metric-grid">
+          <div class="metric"><strong>25/25</strong><span>Extreme strict targets đạt trong runner chính</span></div>
+          <div class="metric"><strong>2424x</strong><span>Native sparse kernel wall-clock speedup so với dense path</span></div>
+          <div class="metric"><strong>128k</strong><span>Context retrieval không attention matrix, không full-history scan</span></div>
+          <div class="metric"><strong>1M</strong><span>Entity-event graph scale với p50 lookup microsecond-level</span></div>
+        </div>
+      </aside>
+    </header>
+
+    <section>
+      <h2>Luồng Kiến Trúc Hợp Nhất</h2>
+      <p>
+        LSL nên được xem như một model duy nhất có shared tokenizer, shared sparse state bus,
+        nhiều mạch chuyên biệt và một unified candidate scorer. Các module không thay nhau làm model riêng;
+        chúng cùng quan sát một token stream và cùng cập nhật trạng thái cục bộ.
+      </p>
+      <div class="diagram-shell">
+        <svg viewBox="0 0 1180 700" role="img" aria-label="Sơ đồ kiến trúc LSL">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="#55636f"></path>
+            </marker>
+            <style>
+              .box{fill:#fff;stroke:#cfd8e3;stroke-width:2}
+              .bus{fill:#e8f3f1;stroke:#0f766e;stroke-width:2}
+              .score{fill:#eef6ff;stroke:#0369a1;stroke-width:2}
+              .learn{fill:#fff7ed;stroke:#b45309;stroke-width:2}
+              .txt{font:600 18px Inter,Arial,sans-serif;fill:#172026}
+              .sub{font:400 13px Inter,Arial,sans-serif;fill:#5a6670}
+              .arrow{stroke:#55636f;stroke-width:2.2;fill:none;marker-end:url(#arrow)}
+            </style>
+          </defs>
+
+          <rect x="40" y="46" width="220" height="78" rx="8" class="box"></rect>
+          <text x="60" y="78" class="txt">Text / Prompt</text>
+          <text x="60" y="101" class="sub">subword stream</text>
+
+          <rect x="330" y="46" width="220" height="78" rx="8" class="box"></rect>
+          <text x="350" y="78" class="txt">Tokenizer</text>
+          <text x="350" y="101" class="sub">one shared vocabulary</text>
+
+          <rect x="630" y="46" width="260" height="78" rx="8" class="bus"></rect>
+          <text x="650" y="78" class="txt">Sparse SDR Bus</text>
+          <text x="650" y="101" class="sub">active indices, local state</text>
+
+          <path d="M260 85 H330" class="arrow"></path>
+          <path d="M550 85 H630" class="arrow"></path>
+
+          <rect x="70" y="205" width="240" height="92" rx="8" class="box"></rect>
+          <text x="92" y="239" class="txt">Predictive Coding</text>
+          <text x="92" y="263" class="sub">local prediction error</text>
+
+          <rect x="360" y="205" width="240" height="92" rx="8" class="box"></rect>
+          <text x="382" y="239" class="txt">Cortical Columns</text>
+          <text x="382" y="263" class="sub">sequence memory, silence</text>
+
+          <rect x="650" y="205" width="240" height="92" rx="8" class="box"></rect>
+          <text x="672" y="239" class="txt">Long Context</text>
+          <text x="672" y="263" class="sub">bounded sparse lookup</text>
+
+          <rect x="940" y="205" width="190" height="92" rx="8" class="box"></rect>
+          <text x="960" y="239" class="txt">Dendrites</text>
+          <text x="960" y="263" class="sub">branch-local compute</text>
+
+          <path d="M760 124 C760 158 190 160 190 205" class="arrow"></path>
+          <path d="M760 124 C760 158 480 160 480 205" class="arrow"></path>
+          <path d="M760 124 C760 158 770 160 770 205" class="arrow"></path>
+          <path d="M760 124 C760 158 1035 160 1035 205" class="arrow"></path>
+
+          <rect x="90" y="380" width="260" height="92" rx="8" class="box"></rect>
+          <text x="112" y="414" class="txt">World Memory</text>
+          <text x="112" y="438" class="sub">evidence, facts, QA</text>
+
+          <rect x="430" y="380" width="320" height="92" rx="8" class="score"></rect>
+          <text x="452" y="414" class="txt">Unified Candidate Scorer</text>
+          <text x="452" y="438" class="sub">merge candidates, fatigue, coherence</text>
+
+          <rect x="830" y="380" width="260" height="92" rx="8" class="box"></rect>
+          <text x="852" y="414" class="txt">Reasoning Workspace</text>
+          <text x="852" y="438" class="sub">math trace, event graph</text>
+
+          <path d="M190 297 C190 340 220 340 220 380" class="arrow"></path>
+          <path d="M480 297 C480 340 560 340 590 380" class="arrow"></path>
+          <path d="M770 297 C770 340 650 340 590 380" class="arrow"></path>
+          <path d="M1035 297 C1035 340 990 340 960 380" class="arrow"></path>
+          <path d="M350 426 H430" class="arrow"></path>
+          <path d="M830 426 H750" class="arrow"></path>
+
+          <rect x="430" y="555" width="320" height="88" rx="8" class="box"></rect>
+          <text x="452" y="589" class="txt">Decoder / Generator</text>
+          <text x="452" y="613" class="sub">next token, answer, open generation</text>
+
+          <rect x="820" y="555" width="270" height="88" rx="8" class="learn"></rect>
+          <text x="842" y="589" class="txt">Online Local Updates</text>
+          <text x="842" y="613" class="sub">Hebbian, fatigue, consolidation</text>
+
+          <path d="M590 472 V555" class="arrow"></path>
+          <path d="M750 599 H820" class="arrow"></path>
+          <path d="M955 555 C1010 500 1088 496 1088 250 C1088 145 900 138 820 124" class="arrow"></path>
+        </svg>
+      </div>
+    </section>
+
+    <section>
+      <h2>Các Mạch Chính</h2>
+      <p>Mỗi mạch nhận cùng token/SDR stream, trả về tín hiệu cục bộ, candidate hoặc memory state.</p>
+      <div class="module-grid">
+        <article class="module">
+          <span class="tag">SDR</span>
+          <h3>Sparse Distributed Representation</h3>
+          <p>Mã hóa token/khái niệm thành active indices thưa. Đây là bus chung cho compute, memory và semantics.</p>
+        </article>
+        <article class="module">
+          <span class="tag green">PC</span>
+          <h3>Predictive Coding</h3>
+          <p>So sánh trạng thái dự đoán và trạng thái thật để tạo local error, suppression và update cục bộ.</p>
+        </article>
+        <article class="module">
+          <span class="tag cyan">Columns</span>
+          <h3>Cortical Column Memory</h3>
+          <p>Học chuỗi token, xử lý surprise bằng burst/silent dynamics, giữ độ trễ gần hằng số theo context.</p>
+        </article>
+        <article class="module">
+          <span class="tag amber">Memory</span>
+          <h3>Long Context + World Memory</h3>
+          <p>Truy hồi fact, evidence và transition qua bounded sparse lookup, không attention matrix và không full scan.</p>
+        </article>
+        <article class="module">
+          <span class="tag violet">Workspace</span>
+          <h3>Reasoning Workspace</h3>
+          <p>Lưu biến cục bộ, trace toán/chương trình, multi-hop relation và entity-event graph.</p>
+        </article>
+        <article class="module">
+          <span class="tag red">Bio</span>
+          <h3>Neuromodulation + Dendrites</h3>
+          <p>Gating plasticity, novelty, fatigue và branch-local nonlinear compute để điều chỉnh học online.</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <h2>Vòng Đời Một Token</h2>
+      <div class="steps">
+        <div class="step"><p><strong>Encode.</strong> Text được tách bằng tokenizer chung, token id được mã hóa thành SDR active indices.</p></div>
+        <div class="step"><p><strong>Predict.</strong> Columns, long-context memory, predictive stack và workspace đều trả candidate hoặc local score.</p></div>
+        <div class="step"><p><strong>Score.</strong> Unified scorer gộp xác suất cục bộ, semantic continuity, reasoning confidence, fatigue và anti-loop penalty.</p></div>
+        <div class="step"><p><strong>Emit.</strong> Decoder chọn token tiếp theo hoặc câu trả lời, rồi đưa token đó trở lại state stream.</p></div>
+        <div class="step"><p><strong>Learn.</strong> Hebbian update, fatigue, hippocampal fast memory và consolidation chạy online tại active synapses.</p></div>
+      </div>
+      <pre class="code">def observe_token(token_id):
+    active = sdr.encode(token_id)
+    pc_error = predictive.observe(active)
+    columns.forward(token_id, learn=True)
+    long_context.observe_transition(prev_token, token_id)
+    neuromod.gate(pc_error, novelty=active)
+    synapse.forward_active(active)
+    synapse.hebbian_update_active(modulator=neuromod.value)</pre>
+    </section>
+
+    <section>
+      <h2>Ràng Buộc Strict</h2>
+      <div class="split">
+        <div class="band">
+          <h3>Không Được Dùng</h3>
+          <p>No backprop, no autograd, no Adam/SGD/RMSprop, no GPU requirement, no PyTorch/TensorFlow/JAX runtime, no Q/K/V attention, no all-pairs token interaction, no global hidden error.</p>
+        </div>
+        <div class="band">
+          <h3>Phải Duy Trì</h3>
+          <p>Online learning, local updates, per-token state transition, active-index sparse compute, bounded candidate lookup, no full-history scan và strict structural scanner.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Năng Lực Đã Đo</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Nhóm</th>
+            <th>Kết quả hiện tại</th>
+            <th>Ý nghĩa</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>SDR capacity</td>
+            <td><span class="ok">505.2 bits</span> với C(100000,40)</td>
+            <td>Không gian biểu diễn tổ hợp cực lớn cho mã thưa.</td>
+          </tr>
+          <tr>
+            <td>Native sparse compute</td>
+            <td><span class="ok">~2424x</span> wall-clock speedup</td>
+            <td>Active-index C kernel vượt dense baseline trong primitive strict.</td>
+          </tr>
+          <tr>
+            <td>Predictive coding</td>
+            <td><span class="ok">99.76%</span> local error drop và suppression</td>
+            <td>Giảm tín hiệu sai số bằng local prediction, không backprop.</td>
+          </tr>
+          <tr>
+            <td>128k retrieval</td>
+            <td><span class="ok">100%</span> sample accuracy, full scan 0</td>
+            <td>Truy hồi sparse dài mà không attention matrix.</td>
+          </tr>
+          <tr>
+            <td>Bio dialogue</td>
+            <td><span class="ok">1637 tokens/s</span>, coherence 0.943, loop 0%</td>
+            <td>BioComputeAgent đã có benchmark sinh hội thoại đa miền.</td>
+          </tr>
+          <tr>
+            <td>Real watt evidence</td>
+            <td><span class="warn">Chưa có trên máy hiện tại</span></td>
+            <td>Module đo Intel Power Gadget/Windows Power Meter đã có, nhưng cần sensor thật để ghi JSON.</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="footer-note">
+        Ghi chú: LSL hiện là architecture proof rất mạnh về sparse scaling, memory và CPU efficiency;
+        chưa phải foundation model ngang Transformer frontier về ngôn ngữ tổng quát.
+      </p>
+    </section>
+  </main>
+</body>
+</html>

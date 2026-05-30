@@ -1,16 +1,32 @@
-"""Living Synapse Language Model - bio-inspired real-time adaptive LM PoC.
-
-This is NOT a LoRA / adapter variant. It is a small autoregressive model
-whose internal weights and circuit routing change in real time during
-inference using local biological rules - no optimizer, no backprop.
-"""
+"""Living Synapse Language Model - bio-inspired online local learning."""
 from .synapse import LivingSynapseLayer
+from .sparse_native import NATIVE_AVAILABLE, require_native
 from .router import DynamicCircuitRouter
 from .neuromod import Neuromodulator
-from .memory import EpisodicBuffer
+from .memory import EpisodicBuffer, SparseKeyValueMemory
+from .long_context import LongContextMemory
+from .generation import DiscoursePlan, DiscourseState, GenerationController
+from .world_memory import EvidenceAnswer, EvidenceRecord, WorldMemory
+from .reasoning import RelationMemory, RoleBindingMemory, TraceReasoningMemory
+from .homeostasis import HomeostaticController, HomeostaticState
+from .workspace import EntityEventGraph, ReasoningWorkspace, WorkspaceStep
+from .event_ssm import EventDrivenSSM
+from .prior import OfflinePriorSDR
+from .agent import IntegratedLSLAgent
+from .bio import (
+    BioComputeAgent,
+    BioNeuromodulator,
+    DendriticLayer,
+    DendriticSegment,
+    HippocampalMemory,
+    LocalPredictiveStack,
+    OnePassCausalMemory,
+    VirtualSparseSDR,
+)
 from .ssm import LivingSSM
 from .model import LivingSynapseLM
 from .tokenizer import SimpleWordTokenizer
+from .subword_tokenizer import SimpleSubwordTokenizer
 from .sdr import (
     SDREncoder,
     hamming_overlap,
@@ -28,21 +44,48 @@ from .semantic_sdr import (
 )
 from .associative_memory import (
     SparseAssociativeMemory,
-    AssociativeMemory,         # legacy alias
+    AssociativeMemory,
 )
 from .cortical_column import CorticalColumnSequenceMemory
 
 __all__ = [
-    # Core layers
     "LivingSynapseLayer",
+    "NATIVE_AVAILABLE",
+    "require_native",
     "DynamicCircuitRouter",
     "Neuromodulator",
     "EpisodicBuffer",
+    "SparseKeyValueMemory",
+    "LongContextMemory",
+    "DiscoursePlan",
+    "DiscourseState",
+    "GenerationController",
+    "EvidenceAnswer",
+    "EvidenceRecord",
+    "WorldMemory",
+    "RelationMemory",
+    "RoleBindingMemory",
+    "TraceReasoningMemory",
+    "HomeostaticController",
+    "HomeostaticState",
+    "ReasoningWorkspace",
+    "WorkspaceStep",
+    "EntityEventGraph",
+    "EventDrivenSSM",
+    "OfflinePriorSDR",
+    "IntegratedLSLAgent",
+    "BioComputeAgent",
+    "BioNeuromodulator",
+    "DendriticLayer",
+    "DendriticSegment",
+    "HippocampalMemory",
+    "LocalPredictiveStack",
+    "OnePassCausalMemory",
+    "VirtualSparseSDR",
     "LivingSSM",
-    # Top-level model
     "LivingSynapseLM",
     "SimpleWordTokenizer",
-    # Phase 1 — SDR primitives
+    "SimpleSubwordTokenizer",
     "SDREncoder",
     "hamming_overlap",
     "pairwise_overlap_matrix",
@@ -51,13 +94,10 @@ __all__ = [
     "sparsity_ratio",
     "active_indices",
     "capacity_stats",
-    # Phase 1 — Semantic SDR
     "SemanticSDREncoder",
     "semantic_overlap",
     "semantic_overlap_ratio",
-    # Phase 1 — Associative Memory / Pattern Completion
     "SparseAssociativeMemory",
     "AssociativeMemory",
-    # Phase 3 — Cortical Column
     "CorticalColumnSequenceMemory",
 ]

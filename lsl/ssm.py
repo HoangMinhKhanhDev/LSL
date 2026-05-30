@@ -7,6 +7,18 @@ import numpy as np
 from .synapse import LivingSynapseLayer
 
 
+def sparsify(x, k_ratio=0.02):
+    """Keep only top-k activations to maintain sparsity."""
+    k = max(1, int(len(x) * k_ratio))
+    if k >= len(x):
+        return x
+    threshold = np.partition(np.abs(x), -k)[-k]
+    mask = np.abs(x) >= threshold
+    result = x.copy()
+    result[~mask] = 0.0
+    return result
+
+
 class LivingSSM:
     def __init__(self, dim, slow_init=0.1, seed=None):
         self.dim = int(dim)
@@ -33,25 +45,32 @@ class LivingSSM:
         self._last_s = None
         self._last_y = None
 
-    def forward(self, x):
-        """Forward pass for a single token vector x of shape (dim,)."""
+    def forward(self, x, use_sparse=False):
+        """Forward pass for a single token vector x of shape (dim,).
+
+        Args:
+            x: input vector of shape (dim,)
+            use_sparse: whether to use sparse computation in B_proj and C_proj
+        """
         x = np.asarray(x, dtype=np.float32)
         self._last_x = x.copy()
         self._last_s_prev = self.s.copy()
         self._step_count += 1
 
         # Compute B_proj(x)
-        Bx = self.B_proj.forward(x)
+        Bx = self.B_proj.forward(x, use_sparse=use_sparse)
         tanh_Bx = np.tanh(Bx)
         self._last_tanh_Bx = tanh_Bx.copy()
 
         # State update
         alpha_eff = np.clip(self.alpha_slow + self.alpha_live, 0.0, 0.99)
         self.s = alpha_eff * self._last_s_prev + (1.0 - alpha_eff) * tanh_Bx
+        if use_sparse:
+            self.s = sparsify(self.s, k_ratio=0.02)
         self._last_s = self.s.copy()
 
         # Compute C_proj(s)
-        y = self.C_proj.forward(self.s)
+        y = self.C_proj.forward(self.s, use_sparse=use_sparse)
         self._last_y = y.copy()
         return y
 

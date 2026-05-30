@@ -1,0 +1,37 @@
+{
+  "passages": [
+    {
+      "text": "The launch code for entity-0000001 is value_101. The handler for entity-0000001 is agent_7.",
+      "tests": [
+        {"question": "What is the launch code for entity-0000001?", "answer": "value_101"},
+        {"question": "What is the handler for entity-0000001?", "answer": "agent_7"}
+      ]
+    },
+    {
+      "text": "The region for entity-0000002 is north. The backup key for entity-0000002 is key_44.",
+      "tests": [
+        {"question": "What is the region for entity-0000002?", "answer": "north"},
+        {"question": "What is the backup key for entity-0000002?", "answer": "key_44"}
+      ]
+    }
+  ],
+  "events": [
+    {"subject": "alice", "relation": "gave", "object": "book"},
+    {"subject": "book", "relation": "went_to", "object": "bob"},
+    {"subject": "bob", "relation": "stored", "object": "shelf"}
+  ],
+  "event_tests": [
+    {"question": "Starting from alice, follow gave then went_to then stored?", "answer": "shelf"}
+  ],
+  "math": [
+    {"question": "Start at 4. Add 7, multiply by 3, subtract 2.", "answer": "31"},
+    {"question": "Start at 9. Subtract 5, square, add 6.", "answer": "22"}
+  ],
+  "programs": [
+    {"question": "Stack program: PUSH 4; PUSH 5; ADD; DUP; MUL.", "answer": "81"},
+    {"question": "Stack program: PUSH 12; PUSH 3; DIV; PUSH 8; ADD.", "answer": "12"}
+  ],
+  "dialogue": [
+    {"context": "User asks for the launch code for entity-0000001.", "question": "What is the launch code for entity-0000001?", "answer": "value_101"}
+  ]
+}

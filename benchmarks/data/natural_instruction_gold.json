@@ -1,0 +1,64 @@
+{
+  "passages": [
+    {
+      "id": "archive_alpha",
+      "text": "The field notebook opens with weather notes, coffee stains, and a list of retired labels that are no longer used. The launch code for amber kite is k7-blue. The dock number for amber kite is pier-14. The handler for amber kite is nora. A separate record says the museum tour begins at ten, which is unrelated to the field devices. For cedar lantern, the launch code is r2-green. For cedar lantern, the dock number is pier-03. Cedar lantern's handler is omar. The supply crate for river glass is crate-88. The handler for river glass is lina. The dock number for river glass is pier-21. The launch code for silver moss is q4-red. Silver moss's handler is dev. The supply crate for silver moss is crate-19. The text also mentions an old kite festival, but that festival has no launch code. For blue comet, the launch code is m9-gold. The handler for blue comet is iris. Blue comet's dock number is pier-09. The last paragraph is a distractor about lunch menus and says that pear soup was popular.",
+      "tests": [
+        {"question": "What is the launch code for amber kite?", "answer": "k7-blue"},
+        {"question": "Which dock number belongs to cedar lantern?", "answer": "pier-03"},
+        {"question": "Who is the handler for river glass?", "answer": "lina"},
+        {"question": "What supply crate is used for silver moss?", "answer": "crate-19"},
+        {"question": "Who handles blue comet?", "answer": "iris"},
+        {"question": "What is the dock number for river glass?", "answer": "pier-21"}
+      ]
+    },
+    {
+      "id": "clinic_beta",
+      "text": "The clinic log contains fictional training records. The triage color for patient atlas is amber. The medicine for patient atlas is saline. Patient atlas's follow-up day is monday. For patient brio, the triage color is blue. For patient brio, the medicine is zinc. Patient brio's follow-up day is thursday. The medicine for patient coda is iron. The triage color for patient coda is green. Patient coda's follow-up day is friday. The nurse wrote a note about a broken printer, which should not affect any medical lookup. For patient delta, the triage color is red. The medicine for patient delta is glucose. Patient delta's follow-up day is sunday.",
+      "tests": [
+        {"question": "What medicine is assigned to patient atlas?", "answer": "saline"},
+        {"question": "What is the follow-up day for patient brio?", "answer": "thursday"},
+        {"question": "What triage color is assigned to patient coda?", "answer": "green"},
+        {"question": "What medicine is assigned to patient delta?", "answer": "glucose"}
+      ]
+    }
+  ],
+  "instructions": [
+    {
+      "instruction": "For archive lookups, return the value in the exact format ANSWER=<value> using lowercase.",
+      "question": "Archive lookup: launch code for amber kite.",
+      "answer": "answer=k7-blue"
+    },
+    {
+      "instruction": "For archive lookups, return the value in the exact format ANSWER=<value> using lowercase.",
+      "question": "Archive lookup: dock number for blue comet.",
+      "answer": "answer=pier-09"
+    },
+    {
+      "instruction": "For clinic lookups, return the value in the exact format CLINIC:<value> using lowercase.",
+      "question": "Clinic lookup: medicine for patient brio.",
+      "answer": "clinic:zinc"
+    },
+    {
+      "instruction": "For clinic lookups, return the value in the exact format CLINIC:<value> using lowercase.",
+      "question": "Clinic lookup: follow-up day for patient delta.",
+      "answer": "clinic:sunday"
+    }
+  ],
+  "math_traces": [
+    {"prompt": "Start at 7. Add 5. Multiply by 3. Subtract 4.", "answer": "32"},
+    {"prompt": "Start at 2. Multiply by 8. Add 6. Divide by 2.", "answer": "11"},
+    {"prompt": "Start at 9. Subtract 3. Square. Add 10.", "answer": "46"},
+    {"prompt": "Start at 100. Divide by 4. Add 9. Multiply by 2.", "answer": "68"},
+    {"prompt": "Start at 5. Add 7. Add 8. Multiply by 2. Subtract 6.", "answer": "34"},
+    {"prompt": "Start at 81. Divide by 9. Add 4. Square.", "answer": "169"}
+  ],
+  "program_traces": [
+    {"prompt": "Stack program: PUSH 3; PUSH 4; ADD; PUSH 2; MUL. What is TOP?", "answer": "14"},
+    {"prompt": "Stack program: PUSH 9; PUSH 5; SUB; PUSH 6; ADD. What is TOP?", "answer": "10"},
+    {"prompt": "Stack program: PUSH 2; DUP; MUL; PUSH 7; ADD. What is TOP?", "answer": "11"},
+    {"prompt": "Stack program: PUSH 8; PUSH 3; SWAP; SUB. What is TOP?", "answer": "-5"},
+    {"prompt": "Stack program: PUSH 6; PUSH 2; DIV; PUSH 5; MUL. What is TOP?", "answer": "15"},
+    {"prompt": "Stack program: PUSH 4; PUSH 5; PUSH 6; ADD; MUL. What is TOP?", "answer": "44"}
+  ]
+}

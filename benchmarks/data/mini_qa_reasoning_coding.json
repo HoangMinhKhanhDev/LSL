@@ -1,0 +1,68 @@
+{
+  "qa": {
+    "facts": [
+      {"subject": "mira", "relation": "lives_in", "object": "oslo"},
+      {"subject": "leo", "relation": "lives_in", "object": "peru"},
+      {"subject": "nora", "relation": "owns", "object": "silver_key"},
+      {"subject": "atlas", "relation": "guards", "object": "north_gate"},
+      {"subject": "iris", "relation": "studies", "object": "botany"},
+      {"subject": "kaito", "relation": "uses", "object": "copper_lens"},
+      {"subject": "mina", "relation": "teaches", "object": "algebra"},
+      {"subject": "soren", "relation": "built", "object": "water_clock"}
+    ],
+    "tests": [
+      {"question": "Where does Mira live?", "subject": "mira", "relation": "lives_in", "answer": "oslo"},
+      {"question": "What does Nora own?", "subject": "nora", "relation": "owns", "answer": "silver_key"},
+      {"question": "Who guards the north gate?", "object": "north_gate", "relation": "guards", "answer": "atlas"},
+      {"question": "What does Kaito use?", "subject": "kaito", "relation": "uses", "answer": "copper_lens"},
+      {"question": "Who teaches algebra?", "object": "algebra", "relation": "teaches", "answer": "mina"},
+      {"question": "What did Soren build?", "subject": "soren", "relation": "built", "answer": "water_clock"}
+    ]
+  },
+  "reasoning": {
+    "chains": [
+      ["seed", "sprout", "flower"],
+      ["spark", "flame", "smoke"],
+      ["cloud", "rain", "river"],
+      ["idea", "plan", "prototype"],
+      ["signal", "relay", "alarm"]
+    ],
+    "role_events": [
+      {"subject": "alice", "verb": "gave", "object": "book", "recipient": "bob"},
+      {"subject": "bob", "verb": "gave", "object": "map", "recipient": "alice"},
+      {"subject": "clara", "verb": "sent", "object": "letter", "recipient": "dina"},
+      {"subject": "dina", "verb": "sent", "object": "photo", "recipient": "clara"}
+    ],
+    "tests": [
+      {"type": "multihop", "source": "seed", "hops": 2, "answer": "flower"},
+      {"type": "multihop", "source": "cloud", "hops": 2, "answer": "river"},
+      {"type": "multihop", "source": "idea", "hops": 2, "answer": "prototype"},
+      {"type": "role_object", "subject": "alice", "verb": "gave", "answer": "book"},
+      {"type": "role_subject", "verb": "gave", "object": "map", "answer": "bob"},
+      {"type": "role_recipient", "subject": "clara", "verb": "sent", "object": "letter", "answer": "dina"}
+    ]
+  },
+  "coding": {
+    "examples": [
+      {"function": "add_one", "input": [1], "output": 2},
+      {"function": "add_one", "input": [7], "output": 8},
+      {"function": "double", "input": [2], "output": 4},
+      {"function": "double", "input": [9], "output": 18},
+      {"function": "affine_2x_plus_3", "input": [2], "output": 7},
+      {"function": "affine_2x_plus_3", "input": [6], "output": 15},
+      {"function": "sum_pair", "input": [0, 0], "output": 0},
+      {"function": "sum_pair", "input": [1, 0], "output": 1},
+      {"function": "sum_pair", "input": [0, 1], "output": 1},
+      {"function": "weighted_pair", "input": [0, 0], "output": 1},
+      {"function": "weighted_pair", "input": [1, 0], "output": 3},
+      {"function": "weighted_pair", "input": [0, 1], "output": 4}
+    ],
+    "tests": [
+      {"question": "add_one(12)", "function": "add_one", "input": [12], "answer": 13},
+      {"question": "double(11)", "function": "double", "input": [11], "answer": 22},
+      {"question": "affine_2x_plus_3(10)", "function": "affine_2x_plus_3", "input": [10], "answer": 23},
+      {"question": "sum_pair(7, 6)", "function": "sum_pair", "input": [7, 6], "answer": 13},
+      {"question": "weighted_pair(4, 5)", "function": "weighted_pair", "input": [4, 5], "answer": 24}
+    ]
+  }
+}
