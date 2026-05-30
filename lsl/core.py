@@ -20,6 +20,7 @@ import numpy as np
 
 from .bio import BioComputeAgent
 from .generation import GenerationController
+from . import sparse_native
 from .sparse_native import NATIVE_AVAILABLE
 from .synapse import LivingSynapseLayer
 
@@ -30,6 +31,7 @@ class LSLCoreConfig:
     tokenizer: str = "subword"
     candidate_cap: int = 128
     seed: int = 42
+    runtime_profile: str = "full"
     consolidation_interval: int = 4096
     consolidation_fraction: float = 0.02
     use_native_core: bool = True
@@ -46,11 +48,16 @@ class LSLCoreModel:
         if config is not None and kwargs:
             raise ValueError("Pass either config or keyword settings, not both")
         self.config = config or LSLCoreConfig(**kwargs)
+        full_modules = self._runtime_profile_from_config(self.config) == "full"
         self.agent = BioComputeAgent(
             vocab_size=self.config.vocab_size,
             tokenizer=self.config.tokenizer,
             candidate_cap=self.config.candidate_cap,
             seed=self.config.seed,
+            use_pc_v2=full_modules,
+            use_sdr_v2=full_modules,
+            use_columns=full_modules,
+            use_neuromodulation=full_modules,
         )
         self.tokenizer_built = False
         self.prev_token: Optional[int] = None
@@ -88,6 +95,27 @@ class LSLCoreModel:
             "update_touched": 0.0,
         }.items():
             self.native_core_stats.setdefault(key, value)
+
+    @staticmethod
+    def _runtime_profile_from_config(config: LSLCoreConfig) -> str:
+        profile = str(getattr(config, "runtime_profile", "full")).strip().lower().replace("-", "_")
+        if profile not in {"full", "native_long_context", "native_fast"}:
+            raise ValueError(f"Unsupported LSL runtime profile: {profile}")
+        return profile
+
+    def runtime_profile(self) -> str:
+        self._upgrade_runtime()
+        return self._runtime_profile_from_config(self.config)
+
+    def set_runtime_profile(self, profile: str) -> None:
+        self.config.runtime_profile = str(profile).strip().lower().replace("-", "_")
+        full_modules = self.runtime_profile() == "full"
+        self.agent.use_pc_v2 = full_modules
+        self.agent.use_sdr_v2 = full_modules
+        self.agent.use_columns = full_modules
+        self.agent.use_neuromodulation = full_modules
+        if not full_modules:
+            self.config.consolidation_interval = 0
 
     @property
     def vocab_size(self) -> int:
@@ -192,14 +220,47 @@ class LSLCoreModel:
         self._record_native_update(self.native_transition.last_update_ops)
 
     def _native_predict(self, token_id: int) -> tuple[Optional[int], float]:
-        scores = self._native_scores(token_id)
-        if scores is None or len(scores) == 0:
+        summary = self._native_score_summary(token_id)
+        if summary is None:
             return None, 0.0
-        best = int(np.argmax(scores))
-        value = float(scores[best])
+        best = int(summary.get("best_index", -1))
+        value = float(summary.get("best_score", 0.0))
         if value <= 1.0e-8:
             return None, 0.0
         return best, value
+
+    def _native_score_summary(self, token_id: int, target_id: int = -1) -> Optional[Dict[str, float]]:
+        if not self._ensure_native_core() or self.native_transition is None:
+            return None
+        try:
+            stats = sparse_native.score_active(
+                self.native_transition.W_slow,
+                self.native_transition.W_live,
+                self.native_transition.fatigue,
+                np.array([int(token_id) % self.vocab_size], dtype=np.intp),
+                np.ones(1, dtype=np.float32),
+                int(target_id),
+            )
+        except RuntimeError:
+            scores = self._native_scores(token_id)
+            if scores is None:
+                return None
+            positive = np.maximum(scores.astype(np.float32, copy=False), 0.0)
+            best = int(np.argmax(scores))
+            target = int(target_id)
+            return {
+                "mode": "python_sparse_active_score",
+                "best_index": float(best),
+                "best_score": float(scores[best]),
+                "target_score": float(positive[target]) if 0 <= target < len(positive) else 0.0,
+                "positive_sum": float(np.sum(positive)),
+                "touched": float(len(scores)),
+            }
+        self._record_native_forward({
+            "mode": stats.get("mode", "native_sparse_active_score"),
+            "fatigue_touched": int(stats.get("touched", self.vocab_size)),
+        })
+        return stats
 
     def rebuild_native_core_from_memory(self) -> Dict[str, float]:
         """Pack learned one-token transitions into the native C sparse head.
@@ -247,28 +308,30 @@ class LSLCoreModel:
         }
 
     def observe_token(self, token_id: int, learn: bool = True) -> None:
+        profile = self.runtime_profile()
         token = int(token_id) % max(1, self.vocab_size)
         if learn and self.prev_token is not None:
             self._native_observe_transition(self.prev_token, token)
-            self.agent.long_context.observe_transition(self.prev_token, token, vocab_size=self.vocab_size)
-            self.agent.homeostasis.observe(active_count=1, total_count=max(1, self.vocab_size), local_error=0.10)
+            if profile != "native_fast":
+                self.agent.long_context.observe_transition(self.prev_token, token, vocab_size=self.vocab_size)
+                self.agent.homeostasis.observe(active_count=1, total_count=max(1, self.vocab_size), local_error=0.10)
 
-        if self.agent.use_sdr_v2:
+        if profile == "full" and self.agent.use_sdr_v2:
             bits = self.agent.sdr_v2.encode(str(token))
             self.agent.sdr_observations += 1
             self.agent.sdr_active_total += len(bits)
 
-        if self.agent.use_columns and token < self.agent.columns.vocab_size:
+        if profile == "full" and self.agent.use_columns and token < self.agent.columns.vocab_size:
             self.agent.columns.forward(token, learn=learn)
 
-        if self.agent.use_pc_v2:
+        if profile == "full" and self.agent.use_pc_v2:
             states = [
                 self.agent.pc_v2.state_for(token + layer * 997, layer)
                 for layer in range(self.agent.pc_v2.layers)
             ]
             self.agent.pc_v2.observe(states, learn=learn)
 
-        if learn and self.agent.use_neuromodulation:
+        if profile == "full" and learn and self.agent.use_neuromodulation:
             surprise = 0.8 if self.agent.bio_modulator.seen[str(token)] == 0 else 0.05
             self.agent.bio_modulator.observe(str(token), surprise=surprise)
 
@@ -301,7 +364,8 @@ class LSLCoreModel:
     def observe(self, text: str, source: str = "core", learn: bool = True) -> Dict[str, float]:
         if not self.tokenizer_built:
             self.build_tokenizer(text)
-        self.agent.world.observe_chunk(text, source=source)
+        if self.runtime_profile() != "native_fast":
+            self.agent.world.observe_chunk(text, source=source)
         tokens = self.encode(text)
         if not learn:
             return {"tokens": float(len(tokens)), "elapsed_seconds": 0.0, "us_per_token": 0.0}
@@ -324,7 +388,8 @@ class LSLCoreModel:
         total_seconds = 0.0
         self.reset_state()
         for idx, text in enumerate(items):
-            self.agent.world.observe_chunk(text, source=f"stream:{idx}")
+            if self.runtime_profile() != "native_fast":
+                self.agent.world.observe_chunk(text, source=f"stream:{idx}")
             tokens = self.encode(text)
             if max_tokens is not None:
                 remaining = int(max_tokens) - total_tokens
@@ -348,6 +413,9 @@ class LSLCoreModel:
         tokens = self.encode(prompt) if isinstance(prompt, str) else [int(x) for x in prompt]
         if not tokens:
             return None
+        if self.runtime_profile() == "native_fast":
+            native_token, _ = self._native_predict(tokens[-1])
+            return native_token
         votes: Dict[int, float] = {}
         native_token, native_score = self._native_predict(tokens[-1])
         if native_token is not None:
@@ -359,6 +427,18 @@ class LSLCoreModel:
             return None
         return int(max(votes.items(), key=lambda item: (item[1], -item[0]))[0])
 
+    def _native_probability_and_prediction(self, current: int, target: int) -> tuple[float, Optional[int]]:
+        vocab = max(1, int(self.vocab_size))
+        summary = self._native_score_summary(int(current), int(target))
+        if summary is None:
+            return 1.0 / vocab, None
+        total = float(summary.get("positive_sum", 0.0))
+        if total <= 1.0e-8:
+            return 1.0 / vocab, None
+        alpha = 0.05
+        prob = (float(summary.get("target_score", 0.0)) + alpha) / (total + alpha * vocab)
+        return float(max(prob, 1e-12)), int(summary.get("best_index", -1))
+
     def evaluate_tokens(self, tokens: Sequence[int], update_context: bool = True) -> Dict[str, float]:
         items = [int(token) % max(1, self.vocab_size) for token in tokens]
         if len(items) < 2:
@@ -369,13 +449,16 @@ class LSLCoreModel:
         times: List[float] = []
         for current, target in zip(items, items[1:]):
             t0 = time.perf_counter_ns()
-            prob = self.agent.long_context.target_probability(
-                current,
-                target,
-                vocab_size=self.vocab_size,
-                update_context=update_context,
-            )
-            pred = self.agent.long_context.top_next(current, vocab_size=self.vocab_size)
+            if self.runtime_profile() == "native_fast":
+                prob, pred = self._native_probability_and_prediction(current, target)
+            else:
+                prob = self.agent.long_context.target_probability(
+                    current,
+                    target,
+                    vocab_size=self.vocab_size,
+                    update_context=update_context,
+                )
+                pred = self.agent.long_context.top_next(current, vocab_size=self.vocab_size)
             times.append((time.perf_counter_ns() - t0) / 1000.0)
             losses.append(-math.log(max(float(prob), 1e-12)))
             correct += int(pred == target)
@@ -447,6 +530,7 @@ class LSLCoreModel:
         return {
             "seen_tokens": float(self.seen_tokens),
             "training_seconds": float(self.training_seconds),
+            "runtime_profile": self.runtime_profile(),
             "native_core_available": float(NATIVE_AVAILABLE),
             "native_core_enabled": float(self.native_transition is not None),
             "native_core_vocab": float(self.native_transition.in_dim if self.native_transition is not None else 0),

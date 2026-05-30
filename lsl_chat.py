@@ -42,7 +42,12 @@ def bootstrap_checkpoint(args: argparse.Namespace) -> LSLCoreModel:
         f"({args.bootstrap_tokens:,} tokens) from {source_path}",
         file=sys.stderr,
     )
-    model = LSLCoreModel(vocab_size=args.vocab_size, candidate_cap=args.candidate_cap, seed=args.seed)
+    model = LSLCoreModel(
+        vocab_size=args.vocab_size,
+        candidate_cap=args.candidate_cap,
+        seed=args.seed,
+        runtime_profile=args.lsl_profile,
+    )
     metrics = model.train_stream([text], tokenizer_text_chars=args.bootstrap_chars, max_tokens=args.bootstrap_tokens)
     model.save(args.checkpoint)
     print(
@@ -86,6 +91,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--vocab-size", type=int, default=8000)
     parser.add_argument("--candidate-cap", type=int, default=128)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--lsl-profile", choices=["full", "native_long_context", "native_fast"], default="native_fast")
     parser.add_argument("--no-save-native-upgrade", action="store_true")
     return parser.parse_args()
 
@@ -102,6 +108,7 @@ def main() -> int:
         model = bootstrap_checkpoint(args)
     else:
         model = LSLCoreModel.load(args.checkpoint)
+        model.set_runtime_profile(args.lsl_profile)
         ensure_native_chat_path(model, args.checkpoint, save_upgrade=not args.no_save_native_upgrade)
     if args.prompt is not None:
         print(respond(model, args.prompt, args.max_new_tokens))

@@ -231,19 +231,27 @@ def run(args: argparse.Namespace) -> Dict[str, object]:
     facts_text = fact_block(facts)
     if facts_text:
         train_text = train_text + "\n" + facts_text
-    lsl = LSLCoreModel(vocab_size=args.vocab_size, seed=args.seed, candidate_cap=args.candidate_cap)
+    lsl = LSLCoreModel(
+        vocab_size=args.vocab_size,
+        seed=args.seed,
+        candidate_cap=args.candidate_cap,
+        runtime_profile=args.lsl_profile,
+    )
     lsl.build_tokenizer(train_text[: args.tokenizer_train_chars])
     train_tokens = lsl.encode(train_text)[: args.max_train_tokens]
     eval_tokens = lsl.encode(eval_text)[: args.max_eval_tokens]
     if len(train_tokens) < args.context + 4 or len(eval_tokens) < args.context + 4:
         raise ValueError("Not enough tokens for the requested context/eval window")
 
-    tracemalloc.start()
+    lsl_peak = 0
+    if args.trace_memory:
+        tracemalloc.start()
     t0 = time.perf_counter()
     lsl_train = lsl.fit_tokens(train_tokens)
     lsl_train_seconds = time.perf_counter() - t0
-    _, lsl_peak = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
+    if args.trace_memory:
+        _, lsl_peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
     lsl_eval = lsl.evaluate_tokens(eval_tokens[: args.eval_tokens])
     lsl_size = model_size_bytes(lsl)
 
@@ -289,6 +297,7 @@ def run(args: argparse.Namespace) -> Dict[str, object]:
         "train_tokens": len(train_tokens),
         "eval_tokens": min(len(eval_tokens), args.eval_tokens),
         "context": args.context,
+        "lsl_profile": args.lsl_profile,
         "lsl": {
             **lsl_eval,
             "train_seconds": float(lsl_train_seconds),
@@ -313,6 +322,9 @@ def run(args: argparse.Namespace) -> Dict[str, object]:
         "comparison": {
             "loss_ratio_lsl_over_transformer": float(lsl_eval["loss"] / max(tf_eval["loss"], 1e-12)),
             "latency_speedup_transformer_over_lsl": float(tf_eval["p50_latency_us"] / max(lsl_eval["p50_latency_us"], 1e-12)),
+            "train_speedup_lsl_over_transformer": float(
+                (1_000_000.0 * transformer_train_seconds / max(1, train_cut)) / max(lsl_train["us_per_token"], 1e-12)
+            ),
             "train_speedup_transformer_over_lsl": float(
                 (1_000_000.0 * transformer_train_seconds / max(1, train_cut)) / max(lsl_train["us_per_token"], 1e-12)
             ),
@@ -375,6 +387,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-tokens", type=int, default=1200)
     parser.add_argument("--vocab-size", type=int, default=4000)
     parser.add_argument("--candidate-cap", type=int, default=128)
+    parser.add_argument("--lsl-profile", choices=["full", "native_long_context", "native_fast"], default="native_fast")
+    parser.add_argument("--trace-memory", action="store_true", help="enable tracemalloc peak memory measurement during LSL training")
     parser.add_argument("--d-model", type=int, default=96)
     parser.add_argument("--context", type=int, default=32)
     parser.add_argument("--context-lengths", type=str, default="16,32,64,128")
@@ -409,13 +423,13 @@ def main() -> int:
     print("=" * 88)
     print(f"Dataset:                 {metrics['dataset']} ({metrics['corpus_path']})")
     print(f"Train/eval tokens:       {metrics['train_tokens']:,} / {metrics['eval_tokens']:,}")
-    print(f"Vocab/context:           {metrics['vocab_size']:,} / {metrics['context']}")
+    print(f"Vocab/context/profile:   {metrics['vocab_size']:,} / {metrics['context']} / {metrics['lsl_profile']}")
     print("-" * 88)
     print(f"LSL loss/ppl/acc:        {metrics['lsl']['loss']:.4f} / {metrics['lsl']['perplexity']:.2f} / {metrics['lsl']['accuracy']:.2%}")
     print(f"TF loss/ppl/acc:         {metrics['transformer']['loss']:.4f} / {metrics['transformer']['perplexity']:.2f} / {metrics['transformer']['accuracy']:.2%}")
     print(f"Loss ratio LSL/TF:       {comp['loss_ratio_lsl_over_transformer']:.3f}x")
     print(f"Latency speedup TF/LSL:  {comp['latency_speedup_transformer_over_lsl']:.2f}x")
-    print(f"Train speedup TF/LSL:    {comp['train_speedup_transformer_over_lsl']:.2f}x")
+    print(f"Train speedup LSL/TF:    {comp['train_speedup_lsl_over_transformer']:.2f}x")
     print(f"Size ratio TF/LSL:       {comp['size_ratio_transformer_over_lsl']:.3f}x")
     print(f"Train tok/s LSL / TF:    {metrics['lsl']['train_tokens_per_second']:.1f} / {metrics['transformer']['train_tokens_per_second']:.1f}")
     print(f"Infer tok/s LSL / TF:    {metrics['lsl']['inference_tokens_per_second']:.1f} / {metrics['transformer']['inference_tokens_per_second']:.1f}")

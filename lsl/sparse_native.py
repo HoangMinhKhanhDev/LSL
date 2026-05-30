@@ -106,3 +106,24 @@ def target_update_active(
         float(decay),
         float(max_abs),
     )
+
+
+def score_active(
+    w_slow: np.ndarray,
+    w_live: np.ndarray,
+    fatigue: np.ndarray,
+    active_indices: np.ndarray,
+    active_values: np.ndarray,
+    target_index: int = -1,
+) -> Dict[str, float]:
+    require_native()
+    if not hasattr(_sparse_native, "score_active"):
+        raise RuntimeError("lsl._sparse_native was built without score_active")
+    return _sparse_native.score_active(
+        w_slow,
+        w_live,
+        fatigue,
+        np.asarray(active_indices, dtype=np.intp),
+        np.asarray(active_values, dtype=np.float32),
+        int(target_index),
+    )

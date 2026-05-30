@@ -43,6 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tokenizer-train-chars", type=int, default=250000)
     parser.add_argument("--vocab-size", type=int, default=8000)
     parser.add_argument("--candidate-cap", type=int, default=128)
+    parser.add_argument("--lsl-profile", choices=["full", "native_long_context", "native_fast"], default="native_fast")
     parser.add_argument("--checkpoint", type=str, default=None)
     parser.add_argument("--json-output", type=str, default=None)
     parser.add_argument("--seed", type=int, default=42)
@@ -53,7 +54,12 @@ def main() -> int:
     args = parse_args()
     text, path = read_text(args)
     checkpoint = args.checkpoint or os.path.join("checkpoints", f"lsl_{args.dataset}.json")
-    model = LSLCoreModel(vocab_size=args.vocab_size, seed=args.seed, candidate_cap=args.candidate_cap)
+    model = LSLCoreModel(
+        vocab_size=args.vocab_size,
+        seed=args.seed,
+        candidate_cap=args.candidate_cap,
+        runtime_profile=args.lsl_profile,
+    )
     started = time.perf_counter()
     metrics = model.train_stream([text], tokenizer_text_chars=args.tokenizer_train_chars, max_tokens=args.max_tokens)
     elapsed = time.perf_counter() - started
@@ -73,6 +79,7 @@ def main() -> int:
             "tokens_per_second": float(metrics["tokens"] / max(elapsed, 1e-12)),
             "vocab_size": model.vocab_size,
             "seen_tokens": diag.get("seen_tokens", 0.0),
+            "lsl_profile": args.lsl_profile,
         },
         "sample_prompt": sample_prompt,
         "sample": sample,
@@ -86,6 +93,7 @@ def main() -> int:
     print(f"Train tok/s:      {payload['metrics']['tokens_per_second']:.2f}")
     print(f"us/token:         {metrics['us_per_token']:.2f}")
     print(f"Vocab:            {model.vocab_size:,}")
+    print(f"Profile:          {args.lsl_profile}")
     print(f"Sample:           {sample[:240]}")
     if args.json_output:
         os.makedirs(os.path.dirname(args.json_output) or ".", exist_ok=True)
@@ -96,4 +104,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
