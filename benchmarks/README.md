@@ -144,3 +144,5 @@ python lsl_chat.py --checkpoint checkpoints/lsl_tinystories.json
 
 If the default checkpoint is absent, `lsl_chat.py` bootstraps a small local
 TinyStories checkpoint before entering the chat loop.
+When the native extension is built, chat generation is routed through the C
+sparse transition head; `/diag` reports native forward/update ratios.

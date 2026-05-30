@@ -215,6 +215,26 @@ class LivingSynapseLayer:
         active = self._last_active.astype(np.intp, copy=False)
         values = self._active_values()
         err = np.asarray(error_signal, dtype=np.float32)
+        if sparse_native.NATIVE_AVAILABLE and len(active) > 0:
+            try:
+                stats = sparse_native.supervised_update_active(
+                    self.W_live,
+                    active,
+                    values,
+                    err,
+                    float(lr),
+                    float(decay),
+                    float(max_norm),
+                )
+                self.last_update_ops = {
+                    "mode": stats.get("mode", "native_sparse_active_supervised"),
+                    "ops": int(stats.get("ops", self.out_dim * len(active))),
+                    "active_inputs": int(stats.get("active_inputs", len(active))),
+                    "weights_touched": int(stats.get("touched", self.out_dim * len(active))),
+                }
+                return
+            except RuntimeError:
+                pass
         self.W_live[:, active] *= (1.0 - lr * decay)
         for i, c in enumerate(active):
             self.W_live[:, c] += lr * err * values[i]

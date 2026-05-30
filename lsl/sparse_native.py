@@ -61,3 +61,25 @@ def hebbian_update_active(
         float(max_norm),
     )
 
+
+def supervised_update_active(
+    w_live: np.ndarray,
+    active_indices: np.ndarray,
+    active_values: np.ndarray,
+    error: np.ndarray,
+    lr: float,
+    decay: float,
+    max_norm: float,
+) -> Dict[str, int]:
+    require_native()
+    if not hasattr(_sparse_native, "supervised_update_active"):
+        raise RuntimeError("lsl._sparse_native was built without supervised_update_active")
+    return _sparse_native.supervised_update_active(
+        w_live,
+        np.asarray(active_indices, dtype=np.intp),
+        np.asarray(active_values, dtype=np.float32),
+        np.asarray(error, dtype=np.float32),
+        float(lr),
+        float(decay),
+        float(max_norm),
+    )

@@ -280,6 +280,7 @@ def run(args: argparse.Namespace) -> Dict[str, object]:
     lsl.agent.observe_event("beta", "link", "sigma", episode_id=2, evidence_id=2)
     lsl.answer("What does beta link?")
     online_adaptation_us = (time.perf_counter_ns() - t0) / 1000.0
+    native_diag = lsl.diagnostics()
 
     metrics = {
         "dataset": args.dataset,
@@ -336,6 +337,17 @@ def run(args: argparse.Namespace) -> Dict[str, object]:
             "works": bool(lsl_answer_after == "omega"),
         },
         "fact_recall": fact_recall,
+        "native_core": {
+            "available": float(native_diag.get("native_core_available", 0.0)),
+            "enabled": float(native_diag.get("native_core_enabled", 0.0)),
+            "vocab": float(native_diag.get("native_core_vocab", 0.0)),
+            "forward_calls": float(native_diag.get("native_core_forward_calls", 0.0)),
+            "update_calls": float(native_diag.get("native_core_update_calls", 0.0)),
+            "forward_native_ratio": float(native_diag.get("native_core_forward_native_ratio", 0.0)),
+            "update_native_ratio": float(native_diag.get("native_core_update_native_ratio", 0.0)),
+            "forward_touched": float(native_diag.get("native_core_forward_touched", 0.0)),
+            "update_touched": float(native_diag.get("native_core_update_touched", 0.0)),
+        },
     }
 
     checks = {
@@ -409,6 +421,13 @@ def main() -> int:
     print(f"Infer tok/s LSL / TF:    {metrics['lsl']['inference_tokens_per_second']:.1f} / {metrics['transformer']['inference_tokens_per_second']:.1f}")
     print(f"Memory MB LSL / TF:      {metrics['lsl']['model_size_mb']:.2f} / {metrics['transformer']['model_size_mb']:.2f}")
     print(f"Energy proxy saving:     latency={comp['latency_energy_proxy_saving']:.2%}, ops={comp['ops_energy_proxy_saving']:.2%}")
+    native = metrics["native_core"]
+    print(
+        "Native C core:           "
+        f"enabled={bool(native['enabled'])}, "
+        f"forward_native={native['forward_native_ratio']:.2%}, "
+        f"update_native={native['update_native_ratio']:.2%}"
+    )
     print(f"LSL generation coherence:{metrics['generation']['lsl_metrics']['coherence']:.3f}")
     print(f"LSL loop/UNK:            {metrics['generation']['lsl_metrics']['loop_rate']:.2%} / {metrics['generation']['lsl_metrics']['unk_rate']:.2%}")
     print(f"Fact recall LSL / TF:    {metrics['fact_recall']['lsl_fact_recall']:.2%} / {metrics['fact_recall']['transformer_next_token_fact_accuracy']:.2%}")

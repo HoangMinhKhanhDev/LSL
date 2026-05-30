@@ -128,6 +128,11 @@ missing:
 python lsl_chat.py --checkpoint checkpoints/lsl_tinystories.json
 ```
 
+The chat path uses the native C sparse transition head when
+`lsl._sparse_native` is built. Older checkpoints are upgraded on load by packing
+their learned transition counts into that native core; `/diag` prints the
+native forward/update ratios.
+
 The full profile includes 1M-vocabulary semantic SDR scaling, 100k-pattern SDR
 memory, 128k-horizon sparse retrieval, long-context fact/instruction/transition
 memory, real-corpus TinyStories and WikiText-2 long-context evidence,

@@ -2,7 +2,7 @@
 import os
 import tempfile
 
-from lsl import LSLCoreModel
+from lsl import LSLCoreModel, NATIVE_AVAILABLE
 
 
 def main():
@@ -19,6 +19,10 @@ def main():
     assert generated
     diag = model.diagnostics()
     assert diag["seen_tokens"] >= metrics["tokens"]
+    if NATIVE_AVAILABLE:
+        assert diag["native_core_enabled"] == 1.0, diag
+        assert diag["native_core_forward_native_ratio"] == 1.0, diag
+        assert diag["native_core_update_native_ratio"] == 1.0, diag
     with tempfile.TemporaryDirectory() as tmpdir:
         path = os.path.join(tmpdir, "core.pkl")
         model.save(path)
@@ -29,4 +33,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

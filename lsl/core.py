@@ -20,6 +20,8 @@ import numpy as np
 
 from .bio import BioComputeAgent
 from .generation import GenerationController
+from .sparse_native import NATIVE_AVAILABLE
+from .synapse import LivingSynapseLayer
 
 
 @dataclass
@@ -30,6 +32,11 @@ class LSLCoreConfig:
     seed: int = 42
     consolidation_interval: int = 4096
     consolidation_fraction: float = 0.02
+    use_native_core: bool = True
+    native_max_vocab: int = 4096
+    native_lr: float = 0.35
+    native_decay: float = 0.0005
+    native_score_weight: float = 2.0
 
 
 class LSLCoreModel:
@@ -50,6 +57,37 @@ class LSLCoreModel:
         self.seen_tokens = 0
         self.training_seconds = 0.0
         self.last_metrics: Dict[str, float] = {}
+        self.native_transition: Optional[LivingSynapseLayer] = None
+        self.native_core_reason = "not initialized"
+        self.native_core_stats: Dict[str, float] = {
+            "forward_calls": 0.0,
+            "native_forward_calls": 0.0,
+            "forward_touched": 0.0,
+            "update_calls": 0.0,
+            "native_update_calls": 0.0,
+            "update_touched": 0.0,
+        }
+
+    def _upgrade_runtime(self) -> None:
+        defaults = LSLCoreConfig()
+        for key, value in defaults.__dict__.items():
+            if not hasattr(self.config, key):
+                setattr(self.config, key, value)
+        if not hasattr(self, "native_transition"):
+            self.native_transition = None
+        if not hasattr(self, "native_core_reason"):
+            self.native_core_reason = "not initialized"
+        if not hasattr(self, "native_core_stats"):
+            self.native_core_stats = {}
+        for key, value in {
+            "forward_calls": 0.0,
+            "native_forward_calls": 0.0,
+            "forward_touched": 0.0,
+            "update_calls": 0.0,
+            "native_update_calls": 0.0,
+            "update_touched": 0.0,
+        }.items():
+            self.native_core_stats.setdefault(key, value)
 
     @property
     def vocab_size(self) -> int:
@@ -62,6 +100,7 @@ class LSLCoreModel:
     def build_tokenizer(self, text: str) -> None:
         self.agent.build_tokenizer(text)
         self.tokenizer_built = True
+        self._ensure_native_core()
 
     def encode(self, text: str) -> List[int]:
         if not self.tokenizer_built:
@@ -78,10 +117,148 @@ class LSLCoreModel:
             self.agent.columns.reset_state()
         if self.agent.use_pc_v2:
             self.agent.pc_v2.reset_state()
+        if self.native_transition is not None:
+            self.native_transition.fatigue.fill(0.0)
+
+    def _ensure_native_core(self) -> bool:
+        self._upgrade_runtime()
+        if not self.config.use_native_core:
+            self.native_transition = None
+            self.native_core_reason = "disabled by config"
+            return False
+        if not NATIVE_AVAILABLE:
+            self.native_transition = None
+            self.native_core_reason = "lsl._sparse_native unavailable"
+            return False
+        vocab = int(self.vocab_size)
+        if vocab <= 1:
+            self.native_transition = None
+            self.native_core_reason = "vocab too small"
+            return False
+        if vocab > int(self.config.native_max_vocab):
+            self.native_transition = None
+            self.native_core_reason = f"vocab {vocab} exceeds native_max_vocab {self.config.native_max_vocab}"
+            return False
+        if (
+            self.native_transition is not None
+            and self.native_transition.in_dim == vocab
+            and self.native_transition.out_dim == vocab
+        ):
+            self.native_core_reason = "enabled"
+            return True
+        self.native_transition = LivingSynapseLayer(
+            vocab,
+            vocab,
+            slow_init=0.0,
+            seed=int(self.config.seed) + 1009,
+        )
+        self.native_core_reason = "enabled"
+        return True
+
+    def _record_native_forward(self, stats: Dict[str, int]) -> None:
+        self.native_core_stats["forward_calls"] += 1.0
+        self.native_core_stats["forward_touched"] += float(stats.get("fatigue_touched", stats.get("touched", 0)))
+        if str(stats.get("mode", "")).startswith("native_"):
+            self.native_core_stats["native_forward_calls"] += 1.0
+
+    def _record_native_update(self, stats: Dict[str, int]) -> None:
+        self.native_core_stats["update_calls"] += 1.0
+        self.native_core_stats["update_touched"] += float(stats.get("weights_touched", stats.get("touched", 0)))
+        if str(stats.get("mode", "")).startswith("native_"):
+            self.native_core_stats["native_update_calls"] += 1.0
+
+    def _native_scores(self, token_id: int) -> Optional[np.ndarray]:
+        if not self._ensure_native_core() or self.native_transition is None:
+            return None
+        post, stats = self.native_transition.forward_active(
+            np.array([int(token_id) % self.vocab_size], dtype=np.intp),
+            np.ones(1, dtype=np.float32),
+            return_stats=True,
+        )
+        self._record_native_forward(stats)
+        return post
+
+    def _native_observe_transition(self, source: int, target: int) -> None:
+        scores = self._native_scores(source)
+        if scores is None or self.native_transition is None:
+            return
+        error = np.zeros(int(self.vocab_size), dtype=np.float32)
+        target = int(target) % self.vocab_size
+        if len(scores):
+            top = int(np.argmax(scores))
+            if top != target and float(scores[top]) > 0.0:
+                error[top] = -0.05
+        error[target] = 1.0
+        self.native_transition.supervised_local_update_active(
+            error,
+            lr=float(self.config.native_lr),
+            decay=float(self.config.native_decay),
+            max_norm=12.0,
+        )
+        self._record_native_update(self.native_transition.last_update_ops)
+
+    def _native_predict(self, token_id: int) -> tuple[Optional[int], float]:
+        scores = self._native_scores(token_id)
+        if scores is None or len(scores) == 0:
+            return None, 0.0
+        best = int(np.argmax(scores))
+        value = float(scores[best])
+        if value <= 1.0e-8:
+            return None, 0.0
+        return best, value
+
+    def rebuild_native_core_from_memory(self) -> Dict[str, float]:
+        """Pack learned one-token transitions into the native C sparse head.
+
+        This upgrades older checkpoints that learned Python sparse transition
+        counts before the native chat path existed.
+        """
+        if not self._ensure_native_core() or self.native_transition is None:
+            return {"rebuilt_sources": 0.0, "rebuilt_edges": 0.0, "native_enabled": 0.0}
+        memory = getattr(self.agent, "long_context", None)
+        counts = getattr(memory, "_unigram_counts", None)
+        if not counts:
+            return {"rebuilt_sources": 0.0, "rebuilt_edges": 0.0, "native_enabled": 1.0}
+        self.native_transition.W_live.fill(0.0)
+        self.native_transition.fatigue.fill(0.0)
+        rebuilt_sources = 0
+        rebuilt_edges = 0
+        vocab = int(self.vocab_size)
+        for source in range(vocab):
+            key = memory._unigram_key(source)
+            bucket = counts.get(key)
+            if not bucket:
+                continue
+            total = float(sum(bucket.values()))
+            if total <= 0.0:
+                continue
+            scores = self._native_scores(source)
+            if scores is None:
+                continue
+            error = np.zeros(vocab, dtype=np.float32)
+            for target, count in bucket.items():
+                target = int(target)
+                if 0 <= target < vocab:
+                    error[target] = float(count) / total
+                    rebuilt_edges += 1
+            self.native_transition.supervised_local_update_active(
+                error,
+                lr=1.0,
+                decay=0.0,
+                max_norm=12.0,
+            )
+            self._record_native_update(self.native_transition.last_update_ops)
+            rebuilt_sources += 1
+        return {
+            "rebuilt_sources": float(rebuilt_sources),
+            "rebuilt_edges": float(rebuilt_edges),
+            "native_enabled": 1.0,
+        }
 
     def observe_token(self, token_id: int, learn: bool = True) -> None:
         token = int(token_id) % max(1, self.vocab_size)
         if learn and self.prev_token is not None:
+            self._native_observe_transition(self.prev_token, token)
             self.agent.long_context.observe_transition(self.prev_token, token, vocab_size=self.vocab_size)
             self.agent.homeostasis.observe(active_count=1, total_count=max(1, self.vocab_size), local_error=0.10)
 
@@ -178,7 +355,18 @@ class LSLCoreModel:
 
     def predict_next_token_id(self, prompt: Sequence[int] | str) -> Optional[int]:
         tokens = self.encode(prompt) if isinstance(prompt, str) else [int(x) for x in prompt]
-        return self.agent.predict_next_token_id(tokens)
+        if not tokens:
+            return None
+        votes: Dict[int, float] = {}
+        native_token, native_score = self._native_predict(tokens[-1])
+        if native_token is not None:
+            votes[int(native_token)] = votes.get(int(native_token), 0.0) + float(native_score) * float(self.config.native_score_weight)
+        agent_token = self.agent.predict_next_token_id(tokens)
+        if agent_token is not None:
+            votes[int(agent_token)] = votes.get(int(agent_token), 0.0) + 1.0
+        if not votes:
+            return None
+        return int(max(votes.items(), key=lambda item: (item[1], -item[0]))[0])
 
     def evaluate_tokens(self, tokens: Sequence[int], update_context: bool = True) -> Dict[str, float]:
         items = [int(token) % max(1, self.vocab_size) for token in tokens]
@@ -219,13 +407,30 @@ class LSLCoreModel:
         return metrics
 
     def generate(self, prompt: str, max_new_tokens: int = 64, stop_on_trigram_loop: bool = True) -> str:
-        generated = self.agent.generate(prompt, max_new_tokens=max_new_tokens)
-        if not stop_on_trigram_loop:
+        tokens = self.encode(prompt)
+        if not tokens:
+            generated = self.agent.generate(prompt, max_new_tokens=max_new_tokens)
             return generated
-        tokens = self.encode(generated)
+        out = [int(token) for token in tokens]
+        trigrams = {tuple(out[i:i + 3]) for i in range(max(0, len(out) - 2))}
+        for _ in range(max(0, int(max_new_tokens))):
+            nxt = self.predict_next_token_id(out)
+            if nxt is None:
+                break
+            tri = tuple((out + [int(nxt)])[-3:])
+            if stop_on_trigram_loop and len(tri) == 3 and tri in trigrams:
+                break
+            out.append(int(nxt))
+            if len(out) >= 3:
+                trigrams.add(tuple(out[-3:]))
+        if len(out) == len(tokens):
+            generated = self.agent.generate(prompt, max_new_tokens=max_new_tokens)
+            if not stop_on_trigram_loop:
+                return generated
+            out = self.encode(generated)
         trimmed: List[int] = []
         trigrams = set()
-        for token in tokens:
+        for token in out:
             trimmed.append(int(token))
             if len(trimmed) < 3:
                 continue
@@ -245,9 +450,21 @@ class LSLCoreModel:
         return self.agent.answer(question)
 
     def diagnostics(self) -> Dict[str, float]:
+        self._upgrade_runtime()
+        forward_calls = self.native_core_stats.get("forward_calls", 0.0)
+        update_calls = self.native_core_stats.get("update_calls", 0.0)
         return {
             "seen_tokens": float(self.seen_tokens),
             "training_seconds": float(self.training_seconds),
+            "native_core_available": float(NATIVE_AVAILABLE),
+            "native_core_enabled": float(self.native_transition is not None),
+            "native_core_vocab": float(self.native_transition.in_dim if self.native_transition is not None else 0),
+            "native_core_forward_calls": float(forward_calls),
+            "native_core_update_calls": float(update_calls),
+            "native_core_forward_native_ratio": self.native_core_stats.get("native_forward_calls", 0.0) / max(1.0, forward_calls),
+            "native_core_update_native_ratio": self.native_core_stats.get("native_update_calls", 0.0) / max(1.0, update_calls),
+            "native_core_forward_touched": float(self.native_core_stats.get("forward_touched", 0.0)),
+            "native_core_update_touched": float(self.native_core_stats.get("update_touched", 0.0)),
             **self.agent.diagnostics(),
         }
 
@@ -283,4 +500,7 @@ class LSLCoreModel:
                 model = pickle.load(f)
         if not isinstance(model, cls):
             raise TypeError(f"Expected LSLCoreModel checkpoint, got {type(model)!r}")
+        model._upgrade_runtime()
+        if getattr(model, "tokenizer_built", False):
+            model._ensure_native_core()
         return model

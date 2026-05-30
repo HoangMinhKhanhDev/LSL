@@ -208,9 +208,96 @@ fail:
 }
 
 
+static PyObject *supervised_update_active(PyObject *self, PyObject *args) {
+    PyObject *live_obj;
+    PyObject *active_obj;
+    PyObject *values_obj;
+    PyObject *error_obj;
+    double lr;
+    double decay;
+    double max_norm;
+    if (!PyArg_ParseTuple(args, "OOOOddd", &live_obj, &active_obj, &values_obj, &error_obj, &lr, &decay, &max_norm)) {
+        return NULL;
+    }
+
+    PyArrayObject *live = (PyArrayObject *)PyArray_FROM_OTF(live_obj, NPY_FLOAT32, NPY_ARRAY_ALIGNED | NPY_ARRAY_WRITEABLE);
+    PyArrayObject *active = (PyArrayObject *)PyArray_FROM_OTF(active_obj, NPY_INTP, NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_ALIGNED);
+    PyArrayObject *values = (PyArrayObject *)PyArray_FROM_OTF(values_obj, NPY_FLOAT32, NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_ALIGNED);
+    PyArrayObject *error = (PyArrayObject *)PyArray_FROM_OTF(error_obj, NPY_FLOAT32, NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_ALIGNED);
+
+    if (!live || !active || !values || !error) {
+        Py_XDECREF(live);
+        Py_XDECREF(active);
+        Py_XDECREF(values);
+        Py_XDECREF(error);
+        return NULL;
+    }
+    if (PyArray_NDIM(live) != 2 || PyArray_NDIM(active) != 1 || PyArray_NDIM(values) != 1 || PyArray_NDIM(error) != 1) {
+        PyErr_SetString(PyExc_ValueError, "invalid array dimensions");
+        goto fail;
+    }
+
+    npy_intp out_dim = PyArray_DIM(live, 0);
+    npy_intp in_dim = PyArray_DIM(live, 1);
+    npy_intp active_count = PyArray_DIM(active, 0);
+    if (PyArray_DIM(values, 0) != active_count || PyArray_DIM(error, 0) != out_dim) {
+        PyErr_SetString(PyExc_ValueError, "array shapes do not match");
+        goto fail;
+    }
+
+    float scale = (float)(1.0 - lr * decay);
+    float step = (float)lr;
+    for (npy_intp j = 0; j < active_count; j++) {
+        npy_intp col = *(npy_intp *)PyArray_GETPTR1(active, j);
+        if (col < 0 || col >= in_dim) {
+            PyErr_SetString(PyExc_IndexError, "active index out of bounds");
+            goto fail;
+        }
+        float value = *(float *)PyArray_GETPTR1(values, j);
+        for (npy_intp row = 0; row < out_dim; row++) {
+            float *w = (float *)PyArray_GETPTR2(live, row, col);
+            float e = *(float *)PyArray_GETPTR1(error, row);
+            *w = (*w) * scale + step * e * value;
+        }
+    }
+
+    for (npy_intp j = 0; j < active_count; j++) {
+        npy_intp col = *(npy_intp *)PyArray_GETPTR1(active, j);
+        double norm2 = 0.0;
+        for (npy_intp row = 0; row < out_dim; row++) {
+            float w = *(float *)PyArray_GETPTR2(live, row, col);
+            norm2 += (double)w * (double)w;
+        }
+        double norm = sqrt(norm2);
+        if (norm > max_norm && norm > 0.0) {
+            float clip = (float)(max_norm / norm);
+            for (npy_intp row = 0; row < out_dim; row++) {
+                float *w = (float *)PyArray_GETPTR2(live, row, col);
+                *w *= clip;
+            }
+        }
+    }
+
+    PyObject *stats = stats_dict("native_sparse_active_supervised", out_dim, active_count);
+    Py_DECREF(live);
+    Py_DECREF(active);
+    Py_DECREF(values);
+    Py_DECREF(error);
+    return stats;
+
+fail:
+    Py_XDECREF(live);
+    Py_XDECREF(active);
+    Py_XDECREF(values);
+    Py_XDECREF(error);
+    return NULL;
+}
+
+
 static PyMethodDef SparseMethods[] = {
     {"forward_active", forward_active, METH_VARARGS, "Run active-index sparse forward and fatigue update."},
     {"hebbian_update_active", hebbian_update_active, METH_VARARGS, "Run active-index local Hebbian update."},
+    {"supervised_update_active", supervised_update_active, METH_VARARGS, "Run active-index local supervised update."},
     {NULL, NULL, 0, NULL}
 };
 
@@ -228,4 +315,3 @@ PyMODINIT_FUNC PyInit__sparse_native(void) {
     import_array();
     return PyModule_Create(&sparsemodule);
 }
-

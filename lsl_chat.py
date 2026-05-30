@@ -53,6 +53,25 @@ def bootstrap_checkpoint(args: argparse.Namespace) -> LSLCoreModel:
     return model
 
 
+def ensure_native_chat_path(model: LSLCoreModel, checkpoint: str, save_upgrade: bool = True) -> None:
+    diag = model.diagnostics()
+    if diag.get("native_core_enabled", 0.0) < 1.0:
+        return
+    if diag.get("native_core_update_calls", 0.0) > 0.0:
+        return
+    packed = model.rebuild_native_core_from_memory()
+    if packed.get("rebuilt_sources", 0.0) <= 0.0:
+        return
+    print(
+        "Packed chat transitions into native C core: "
+        f"sources={int(packed['rebuilt_sources'])}, edges={int(packed['rebuilt_edges'])}",
+        file=sys.stderr,
+    )
+    if save_upgrade:
+        model.save(checkpoint)
+        print(f"Saved native-upgraded checkpoint: {checkpoint}", file=sys.stderr)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint", type=str, default=os.path.join("checkpoints", "lsl_tinystories.json"))
@@ -67,6 +86,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--vocab-size", type=int, default=8000)
     parser.add_argument("--candidate-cap", type=int, default=128)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--no-save-native-upgrade", action="store_true")
     return parser.parse_args()
 
 
@@ -82,6 +102,7 @@ def main() -> int:
         model = bootstrap_checkpoint(args)
     else:
         model = LSLCoreModel.load(args.checkpoint)
+        ensure_native_chat_path(model, args.checkpoint, save_upgrade=not args.no_save_native_upgrade)
     if args.prompt is not None:
         print(respond(model, args.prompt, args.max_new_tokens))
         return 0
@@ -98,7 +119,9 @@ def main() -> int:
             return 0
         if prompt == "/diag":
             diag = model.diagnostics()
-            for key in sorted(diag)[:40]:
+            keys = [key for key in sorted(diag) if key.startswith("native_core_")]
+            keys += [key for key in sorted(diag) if not key.startswith("native_core_")]
+            for key in keys[:40]:
                 print(f"{key}: {diag[key]}")
             continue
         if prompt.startswith("/remember "):
