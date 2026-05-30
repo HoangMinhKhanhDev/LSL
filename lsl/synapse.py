@@ -246,6 +246,45 @@ class LivingSynapseLayer:
             "weights_touched": int(self.out_dim * len(active)),
         }
 
+    def target_update_from_active(self, active_indices, target_index, active_values=None,
+                                  lr=0.05, decay=0.001, max_abs=12.0):
+        active = np.asarray(active_indices, dtype=np.intp)
+        if active_values is None:
+            values = np.ones(len(active), dtype=np.float32)
+        else:
+            values = np.asarray(active_values, dtype=np.float32)
+        target = int(target_index)
+        if sparse_native.NATIVE_AVAILABLE and len(active) > 0:
+            try:
+                stats = sparse_native.target_update_active(
+                    self.W_live,
+                    active,
+                    values,
+                    target,
+                    float(lr),
+                    float(decay),
+                    float(max_abs),
+                )
+                self.last_update_ops = {
+                    "mode": stats.get("mode", "native_sparse_active_target"),
+                    "ops": int(stats.get("ops", len(active))),
+                    "active_inputs": int(stats.get("active_inputs", len(active))),
+                    "weights_touched": int(stats.get("touched", len(active))),
+                }
+                return
+            except RuntimeError:
+                pass
+        scale = 1.0 - float(lr) * float(decay)
+        self.W_live[target, active] *= scale
+        self.W_live[target, active] += float(lr) * values
+        np.clip(self.W_live[target, active], -float(max_abs), float(max_abs), out=self.W_live[target, active])
+        self.last_update_ops = {
+            "mode": "sparse_active_target",
+            "ops": int(len(active)),
+            "active_inputs": int(len(active)),
+            "weights_touched": int(len(active)),
+        }
+
     def hebbian_update(self, modulator, lr=0.05, decay=0.001, max_norm=12.0):
         if self._last_pre is None:
             return

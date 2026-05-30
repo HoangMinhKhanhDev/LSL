@@ -179,21 +179,15 @@ class LSLCoreModel:
         return post
 
     def _native_observe_transition(self, source: int, target: int) -> None:
-        scores = self._native_scores(source)
-        if scores is None or self.native_transition is None:
+        if not self._ensure_native_core() or self.native_transition is None:
             return
-        error = np.zeros(int(self.vocab_size), dtype=np.float32)
-        target = int(target) % self.vocab_size
-        if len(scores):
-            top = int(np.argmax(scores))
-            if top != target and float(scores[top]) > 0.0:
-                error[top] = -0.05
-        error[target] = 1.0
-        self.native_transition.supervised_local_update_active(
-            error,
+        self.native_transition.target_update_from_active(
+            np.array([int(source) % self.vocab_size], dtype=np.intp),
+            int(target) % self.vocab_size,
+            np.ones(1, dtype=np.float32),
             lr=float(self.config.native_lr),
             decay=float(self.config.native_decay),
-            max_norm=12.0,
+            max_abs=12.0,
         )
         self._record_native_update(self.native_transition.last_update_ops)
 
@@ -232,22 +226,19 @@ class LSLCoreModel:
             total = float(sum(bucket.values()))
             if total <= 0.0:
                 continue
-            scores = self._native_scores(source)
-            if scores is None:
-                continue
-            error = np.zeros(vocab, dtype=np.float32)
             for target, count in bucket.items():
                 target = int(target)
                 if 0 <= target < vocab:
-                    error[target] = float(count) / total
+                    self.native_transition.target_update_from_active(
+                        np.array([source], dtype=np.intp),
+                        target,
+                        np.ones(1, dtype=np.float32),
+                        lr=float(count) / total,
+                        decay=0.0,
+                        max_abs=12.0,
+                    )
+                    self._record_native_update(self.native_transition.last_update_ops)
                     rebuilt_edges += 1
-            self.native_transition.supervised_local_update_active(
-                error,
-                lr=1.0,
-                decay=0.0,
-                max_norm=12.0,
-            )
-            self._record_native_update(self.native_transition.last_update_ops)
             rebuilt_sources += 1
         return {
             "rebuilt_sources": float(rebuilt_sources),
