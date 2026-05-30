@@ -16,5 +16,6 @@ tmp/
 temp/
 benchmark_outputs/
 results/
+checkpoints/
 *.out
 *.err

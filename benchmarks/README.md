@@ -20,6 +20,7 @@ commands still work, but the maintained code now lives here:
   a mechanisms 1-5 target suite, 1,000-branch dendritic moonshot checks,
   integrated ablations, BioComputeAgent dialogue generation, and a model-level
   LSL language-model proof
+- `competitive/`: single-model LSLCoreModel vs CPU NumPy Transformer comparisons
 - `strict/`: the canonical all-goals suite
 - `misc/`: legacy or supporting benchmark experiments
 
@@ -121,3 +122,22 @@ python benchmarks/phase9/run_phase9.py --profile full
 Phase 9 is claim-bearing only when `claim` or `full` passes, including the
 model-level LSL proof, BioComputeAgent dialogue generation speed/coherence,
 strict scanner, and JSON success checks for every sub-benchmark.
+
+The competitive single-model runner is:
+
+```bash
+python benchmarks/competitive/run_lsl_vs_transformer.py --dataset tinystories --tokens 100000
+python benchmarks/competitive/run_lsl_vs_transformer.py --dataset wikitext2 --tokens 100000
+```
+
+It reports language loss/perplexity, accuracy, latency, train time, model-size
+proxy, generation metrics, and online adaptation for one unified LSLCoreModel
+against a trainable NumPy Transformer on the same token stream. It also reports
+context-latency rows, QA/fact recall, and latency/ops energy proxies.
+
+Corpus checkpoint training:
+
+```bash
+python benchmarks/train_lsl_corpus.py --dataset tinystories --max-tokens 1000000
+python lsl_chat.py --checkpoint checkpoints/lsl_tinystories.json
+```

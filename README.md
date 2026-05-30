@@ -103,6 +103,29 @@ python benchmarks/phase9/run_phase9.py --profile claim
 python benchmarks/phase9/run_phase9.py --profile full
 ```
 
+The first single-model competitive runner compares one `LSLCoreModel` against a
+trainable CPU NumPy Transformer on the same tokenizer and token budget:
+
+```bash
+python benchmarks/competitive/run_lsl_vs_transformer.py --dataset tinystories --tokens 100000
+python benchmarks/competitive/run_lsl_vs_transformer.py --dataset wikitext2 --tokens 100000
+```
+
+By default this is descriptive, not a strict claim gate. Add `--claim` to make
+the configured quality/latency/generation thresholds fail the command.
+
+Train and save a single LSLCoreModel checkpoint on a real corpus:
+
+```bash
+python benchmarks/train_lsl_corpus.py --dataset tinystories --max-tokens 1000000
+```
+
+Then run the interactive demo:
+
+```bash
+python lsl_chat.py --checkpoint checkpoints/lsl_tinystories.json
+```
+
 The full profile includes 1M-vocabulary semantic SDR scaling, 100k-pattern SDR
 memory, 128k-horizon sparse retrieval, long-context fact/instruction/transition
 memory, real-corpus TinyStories and WikiText-2 long-context evidence,
@@ -130,6 +153,7 @@ Transformer/SSM baselines, and multi-seed scaling checks.
 - `lsl/event_ssm.py`: event-driven sparse state memory.
 - `lsl/prior.py`: optional offline semantic prior quantized into SDRs.
 - `lsl/agent.py`: integrated strict-path agent combining text, memory, reasoning, and generation.
+- `lsl/core.py`: unified `LSLCoreModel` facade for train/evaluate/generate/answer/save/load.
 - `lsl/bio.py`: Phase 9 bio-compute primitives and integrated bio agent.
 - `lsl/hierarchy.py`: learned token-to-phrase-to-topic routing memory.
 - `lsl/cortical_column.py`: local cortical-column sequence memory with burst/silent dynamics and context segments.

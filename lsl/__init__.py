@@ -13,6 +13,7 @@ from .workspace import EntityEventGraph, ReasoningWorkspace, WorkspaceStep
 from .event_ssm import EventDrivenSSM
 from .prior import OfflinePriorSDR
 from .agent import IntegratedLSLAgent
+from .core import LSLCoreConfig, LSLCoreModel
 from .bio import (
     BioComputeAgent,
     BioNeuromodulator,
@@ -74,6 +75,8 @@ __all__ = [
     "EventDrivenSSM",
     "OfflinePriorSDR",
     "IntegratedLSLAgent",
+    "LSLCoreConfig",
+    "LSLCoreModel",
     "BioComputeAgent",
     "BioNeuromodulator",
     "DendriticLayer",

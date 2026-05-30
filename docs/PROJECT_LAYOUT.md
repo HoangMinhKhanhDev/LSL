@@ -13,6 +13,7 @@ supporting scripts.
 - `PHASE9_BIO_COMPUTE.md`: six-mechanism biological compute closure contract
 - `README.md`: quick start and strict verification summary
 - `run_all.py`: umbrella runner for the strict suite
+- `lsl_chat.py`: interactive checkpoint demo for `LSLCoreModel`
 - `benchmark_*.py`: thin compatibility wrappers for the benchmark package
 - `test_*`: unit and integration coverage
 - `demo_*`, `trace_*`, `verify_*`: exploratory scripts and proofs
@@ -31,6 +32,8 @@ Canonical benchmark implementations grouped by purpose:
 - `phase7/`: generalization, self-tuning, event-driven state, optional prior, and long-range reasoning benchmarks
 - `phase8/`: integrated agent, official public dataset adapters, external-style gold, public text, multi-evidence, and scaling checks
 - `phase9/`: biological compute closure checks for predictive coding, SDR, cortical columns, hippocampus, neuromodulation, dendrites, and integrated ablations
+- `competitive/`: single-model LSLCoreModel vs CPU NumPy Transformer comparisons
+- `train_lsl_corpus.py`: real-corpus trainer that writes an `LSLCoreModel` checkpoint
 - `strict/`: canonical 18-goal verification suite
 - `misc/`: supporting experiments and older auxiliary benchmarks
 
@@ -48,6 +51,7 @@ Core package code:
 - `event_ssm.py`: event-driven sparse state memory
 - `prior.py`: optional offline semantic prior
 - `agent.py`: integrated strict-path agent
+- `core.py`: unified `LSLCoreModel` API for train/evaluate/generate/save/load
 - `bio.py`: Phase 9 biological compute primitives and `BioComputeAgent`
 - `hierarchy.py`: learned hierarchy/routing memory
 - `synapse.py`: sparse living synapse primitive
