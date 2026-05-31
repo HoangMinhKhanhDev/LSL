@@ -28,6 +28,18 @@ def main():
         model.save(path)
         loaded = LSLCoreModel.load(path)
         assert loaded.evaluate_text(text)["loss"] < 5.0
+
+    bio = LSLCoreModel(vocab_size=512, seed=11, runtime_profile="bio_native")
+    bio.train_stream([text], max_tokens=160)
+    bio_diag = bio.diagnostics()
+    assert bio_diag["runtime_profile"] == "bio_native"
+    assert bio_diag["bio_native_pc_steps"] > 0.0, bio_diag
+    assert bio_diag["bio_native_sdr_steps"] > 0.0, bio_diag
+    assert bio_diag["bio_native_column_steps"] > 0.0, bio_diag
+    assert bio_diag["bio_native_hippocampus_writes"] > 0.0, bio_diag
+    assert bio_diag["bio_native_neuromod_steps"] > 0.0, bio_diag
+    assert bio_diag["bio_native_dendrite_writes"] > 0.0, bio_diag
+    assert bio.generate("alpha opens", max_new_tokens=8)
     print("LSLCoreModel OK")
 
 

@@ -387,7 +387,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-tokens", type=int, default=1200)
     parser.add_argument("--vocab-size", type=int, default=4000)
     parser.add_argument("--candidate-cap", type=int, default=128)
-    parser.add_argument("--lsl-profile", choices=["full", "native_long_context", "native_fast"], default="native_fast")
+    parser.add_argument("--lsl-profile", choices=["full", "native_long_context", "native_fast", "bio_native"], default="native_fast")
     parser.add_argument("--trace-memory", action="store_true", help="enable tracemalloc peak memory measurement during LSL training")
     parser.add_argument("--d-model", type=int, default=96)
     parser.add_argument("--context", type=int, default=32)

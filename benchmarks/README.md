@@ -138,11 +138,13 @@ context-latency rows, QA/fact recall, and latency/ops energy proxies.
 Corpus checkpoint training:
 
 ```bash
-python benchmarks/train_lsl_corpus.py --dataset tinystories --max-tokens 1000000
-python lsl_chat.py --checkpoint checkpoints/lsl_tinystories.json
+python benchmarks/train_lsl_corpus.py --dataset tinystories --max-tokens 1000000 --lsl-profile native_fast
+python lsl_chat.py --checkpoint checkpoints/lsl_tinystories.json --lsl-profile bio_native
 ```
 
 If the default checkpoint is absent, `lsl_chat.py` bootstraps a small local
 TinyStories checkpoint before entering the chat loop.
 When the native extension is built, chat generation is routed through the C
 sparse transition head; `/diag` reports native forward/update ratios.
+Use `native_fast` for throughput claims and `bio_native` to run the six
+biological mechanisms in one integrated stream.

@@ -51,7 +51,8 @@ Core package code:
 - `event_ssm.py`: event-driven sparse state memory
 - `prior.py`: optional offline semantic prior
 - `agent.py`: integrated strict-path agent
-- `core.py`: unified `LSLCoreModel` API for train/evaluate/generate/save/load
+- `core.py`: unified `LSLCoreModel` API for train/evaluate/generate/save/load,
+  including `native_fast` throughput and `bio_native` six-mechanism profiles
 - `bio.py`: Phase 9 biological compute primitives and `BioComputeAgent`
 - `hierarchy.py`: learned hierarchy/routing memory
 - `synapse.py`: sparse living synapse primitive

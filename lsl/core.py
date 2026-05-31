@@ -14,7 +14,8 @@ import time
 import base64
 import json
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Sequence
+from collections import Counter
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -39,6 +40,11 @@ class LSLCoreConfig:
     native_lr: float = 0.35
     native_decay: float = 0.0005
     native_score_weight: float = 2.0
+    bio_pc_skip_threshold: float = 0.02
+    bio_hippocampus_replay_interval: int = 2048
+    bio_dendrite_weight: float = 0.75
+    bio_column_weight: float = 1.25
+    bio_hippocampus_weight: float = 1.0
 
 
 class LSLCoreModel:
@@ -48,7 +54,8 @@ class LSLCoreModel:
         if config is not None and kwargs:
             raise ValueError("Pass either config or keyword settings, not both")
         self.config = config or LSLCoreConfig(**kwargs)
-        full_modules = self._runtime_profile_from_config(self.config) == "full"
+        profile = self._runtime_profile_from_config(self.config)
+        full_modules = profile in {"full", "bio_native"}
         self.agent = BioComputeAgent(
             vocab_size=self.config.vocab_size,
             tokenizer=self.config.tokenizer,
@@ -74,6 +81,18 @@ class LSLCoreModel:
             "native_update_calls": 0.0,
             "update_touched": 0.0,
         }
+        self.bio_native_stats: Dict[str, float] = {
+            "pc_steps": 0.0,
+            "pc_suppressed_updates": 0.0,
+            "sdr_steps": 0.0,
+            "column_steps": 0.0,
+            "column_predicted": 0.0,
+            "hippocampus_writes": 0.0,
+            "hippocampus_replays": 0.0,
+            "neuromod_steps": 0.0,
+            "dendrite_writes": 0.0,
+            "dendrite_votes": 0.0,
+        }
 
     def _upgrade_runtime(self) -> None:
         defaults = LSLCoreConfig()
@@ -86,6 +105,8 @@ class LSLCoreModel:
             self.native_core_reason = "not initialized"
         if not hasattr(self, "native_core_stats"):
             self.native_core_stats = {}
+        if not hasattr(self, "bio_native_stats"):
+            self.bio_native_stats = {}
         for key, value in {
             "forward_calls": 0.0,
             "native_forward_calls": 0.0,
@@ -95,11 +116,24 @@ class LSLCoreModel:
             "update_touched": 0.0,
         }.items():
             self.native_core_stats.setdefault(key, value)
+        for key, value in {
+            "pc_steps": 0.0,
+            "pc_suppressed_updates": 0.0,
+            "sdr_steps": 0.0,
+            "column_steps": 0.0,
+            "column_predicted": 0.0,
+            "hippocampus_writes": 0.0,
+            "hippocampus_replays": 0.0,
+            "neuromod_steps": 0.0,
+            "dendrite_writes": 0.0,
+            "dendrite_votes": 0.0,
+        }.items():
+            self.bio_native_stats.setdefault(key, value)
 
     @staticmethod
     def _runtime_profile_from_config(config: LSLCoreConfig) -> str:
         profile = str(getattr(config, "runtime_profile", "full")).strip().lower().replace("-", "_")
-        if profile not in {"full", "native_long_context", "native_fast"}:
+        if profile not in {"full", "native_long_context", "native_fast", "bio_native"}:
             raise ValueError(f"Unsupported LSL runtime profile: {profile}")
         return profile
 
@@ -109,12 +143,13 @@ class LSLCoreModel:
 
     def set_runtime_profile(self, profile: str) -> None:
         self.config.runtime_profile = str(profile).strip().lower().replace("-", "_")
-        full_modules = self.runtime_profile() == "full"
+        runtime = self.runtime_profile()
+        full_modules = runtime in {"full", "bio_native"}
         self.agent.use_pc_v2 = full_modules
         self.agent.use_sdr_v2 = full_modules
         self.agent.use_columns = full_modules
         self.agent.use_neuromodulation = full_modules
-        if not full_modules:
+        if runtime == "native_fast":
             self.config.consolidation_interval = 0
 
     @property
@@ -206,18 +241,115 @@ class LSLCoreModel:
         self._record_native_forward(stats)
         return post
 
-    def _native_observe_transition(self, source: int, target: int) -> None:
+    def _native_observe_transition(self, source: int, target: int, lr_scale: float = 1.0) -> None:
         if not self._ensure_native_core() or self.native_transition is None:
+            return
+        lr = max(0.0, float(self.config.native_lr) * float(lr_scale))
+        if lr <= 0.0:
             return
         self.native_transition.target_update_from_active(
             np.array([int(source) % self.vocab_size], dtype=np.intp),
             int(target) % self.vocab_size,
             np.ones(1, dtype=np.float32),
-            lr=float(self.config.native_lr),
+            lr=lr,
             decay=float(self.config.native_decay),
             max_abs=12.0,
         )
         self._record_native_update(self.native_transition.last_update_ops)
+
+    def _bio_sdr_bits(self, token: int) -> Tuple[int, ...]:
+        bits = self.agent.sdr_v2.encode(str(int(token)))
+        self.agent.sdr_observations += 1
+        self.agent.sdr_active_total += len(bits)
+        self.bio_native_stats["sdr_steps"] += 1.0
+        return bits
+
+    def _bio_dendrite_bits(self, token: int) -> Tuple[int, ...]:
+        return tuple(int(bit) % self.agent.dendrites.input_dim for bit in self.agent.sdr_v2.encode(str(int(token))))
+
+    def _bio_pc_observe(self, token: int, learn: bool) -> Dict[str, float]:
+        states = [
+            self.agent.pc_v2.state_for(int(token) + layer * 997, layer)
+            for layer in range(self.agent.pc_v2.layers)
+        ]
+        stats = self.agent.pc_v2.observe(states, learn=learn)
+        self.bio_native_stats["pc_steps"] += 1.0
+        if stats.get("updates", 0.0) == 0.0:
+            self.bio_native_stats["pc_suppressed_updates"] += 1.0
+        return stats
+
+    def _bio_modulation(self, token: int, surprise: float, learn: bool) -> Dict[str, float]:
+        gates = self.agent.bio_modulator.gates(str(int(token)), surprise=float(surprise))
+        if learn:
+            self.agent.bio_modulator.observe(str(int(token)), surprise=float(surprise))
+        self.bio_native_stats["neuromod_steps"] += 1.0
+        return gates
+
+    def _bio_observe_sidecars(
+        self,
+        prev_token: Optional[int],
+        token: int,
+        learn: bool,
+        surprise: float,
+        pc_stats: Dict[str, float],
+    ) -> None:
+        del pc_stats
+        bits = self._bio_sdr_bits(token)
+        if prev_token is not None:
+            self.agent.sdr_v2.observe_related(str(int(prev_token)), str(int(token)))
+
+        if token < self.agent.columns.vocab_size:
+            col = self.agent.columns.forward(token, learn=learn)
+            self.bio_native_stats["column_steps"] += 1.0
+            if col.get("predicted", False):
+                self.bio_native_stats["column_predicted"] += 1.0
+
+        if learn and prev_token is not None:
+            written = self.agent.hippocampus.observe(
+                ["transition", str(int(prev_token))],
+                str(int(token)),
+                surprise=float(surprise),
+            )
+            if written:
+                self.bio_native_stats["hippocampus_writes"] += 1.0
+            dendrite_bits = tuple(int(bit) % self.agent.dendrites.input_dim for bit in bits)
+            self.agent.dendrites.observe(dendrite_bits, output=int(token))
+            self.bio_native_stats["dendrite_writes"] += 1.0
+
+        if (
+            learn
+            and self.config.bio_hippocampus_replay_interval > 0
+            and self.seen_tokens > 0
+            and self.seen_tokens % int(self.config.bio_hippocampus_replay_interval) == 0
+        ):
+            self.bio_native_stats["hippocampus_replays"] += float(
+                self.agent.consolidate(replay_fraction=self.config.consolidation_fraction)
+            )
+
+    def _observe_token_bio_native(self, token: int, learn: bool) -> None:
+        prev = self.prev_token
+        surprise = 1.0
+        if prev is not None:
+            prob, pred = self._native_probability_and_prediction(prev, token)
+            surprise = 1.0 - min(1.0, max(0.0, float(prob)))
+            if pred != token:
+                surprise = max(0.50, surprise)
+
+        pc_stats = self._bio_pc_observe(token, learn=learn)
+        gates = self._bio_modulation(token, surprise=surprise, learn=learn)
+
+        if learn and prev is not None:
+            pc_error = float(pc_stats.get("mean_error", 1.0))
+            gate_gain = 0.60 * float(gates.get("dopamine", 0.5)) + 0.40 * float(gates.get("acetylcholine", 0.5))
+            lr_scale = max(0.02, gate_gain) * max(0.05, pc_error)
+            if pc_error <= float(self.config.bio_pc_skip_threshold) and surprise < 0.05:
+                lr_scale = 0.0
+                self.bio_native_stats["pc_suppressed_updates"] += 1.0
+            self._native_observe_transition(prev, token, lr_scale=lr_scale)
+            self.agent.long_context.observe_transition(prev, token, vocab_size=self.vocab_size)
+            self.agent.homeostasis.observe(active_count=1, total_count=max(1, self.vocab_size), local_error=pc_error)
+
+        self._bio_observe_sidecars(prev, token, learn=learn, surprise=surprise, pc_stats=pc_stats)
 
     def _native_predict(self, token_id: int) -> tuple[Optional[int], float]:
         summary = self._native_score_summary(token_id)
@@ -310,6 +442,12 @@ class LSLCoreModel:
     def observe_token(self, token_id: int, learn: bool = True) -> None:
         profile = self.runtime_profile()
         token = int(token_id) % max(1, self.vocab_size)
+        if profile == "bio_native":
+            self._observe_token_bio_native(token, learn=learn)
+            self.prev_token = token
+            self.seen_tokens += 1
+            self.agent.generator = None
+            return
         if learn and self.prev_token is not None:
             self._native_observe_transition(self.prev_token, token)
             if profile != "native_fast":
@@ -416,6 +554,28 @@ class LSLCoreModel:
         if self.runtime_profile() == "native_fast":
             native_token, _ = self._native_predict(tokens[-1])
             return native_token
+        if self.runtime_profile() == "bio_native":
+            current = int(tokens[-1]) % max(1, self.vocab_size)
+            votes: Counter = Counter()
+            native_token, native_score = self._native_predict(current)
+            if native_token is not None:
+                votes[int(native_token)] += max(0.01, float(native_score)) * float(self.config.native_score_weight)
+            agent_token = self.agent.predict_next_token_id(tokens)
+            if agent_token is not None:
+                votes[int(agent_token)] += float(self.config.bio_column_weight)
+            recalled = self.agent.hippocampus.recall(["transition", str(current)])
+            if recalled is not None:
+                try:
+                    votes[int(recalled) % self.vocab_size] += float(self.config.bio_hippocampus_weight)
+                except ValueError:
+                    pass
+            dendrite_token = self.agent.dendrites.predict(self._bio_dendrite_bits(current))
+            if dendrite_token is not None:
+                votes[int(dendrite_token) % self.vocab_size] += float(self.config.bio_dendrite_weight)
+                self.bio_native_stats["dendrite_votes"] += 1.0
+            if not votes:
+                return None
+            return int(max(votes.items(), key=lambda item: (item[1], -item[0]))[0])
         votes: Dict[int, float] = {}
         native_token, native_score = self._native_predict(tokens[-1])
         if native_token is not None:
@@ -449,8 +609,12 @@ class LSLCoreModel:
         times: List[float] = []
         for current, target in zip(items, items[1:]):
             t0 = time.perf_counter_ns()
-            if self.runtime_profile() == "native_fast":
+            profile = self.runtime_profile()
+            if profile == "native_fast":
                 prob, pred = self._native_probability_and_prediction(current, target)
+            elif profile == "bio_native":
+                prob, _ = self._native_probability_and_prediction(current, target)
+                pred = self.predict_next_token_id([current])
             else:
                 prob = self.agent.long_context.target_probability(
                     current,
@@ -531,6 +695,7 @@ class LSLCoreModel:
             "seen_tokens": float(self.seen_tokens),
             "training_seconds": float(self.training_seconds),
             "runtime_profile": self.runtime_profile(),
+            **{f"bio_native_{k}": float(v) for k, v in self.bio_native_stats.items()},
             "native_core_available": float(NATIVE_AVAILABLE),
             "native_core_enabled": float(self.native_transition is not None),
             "native_core_vocab": float(self.native_transition.in_dim if self.native_transition is not None else 0),

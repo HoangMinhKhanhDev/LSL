@@ -107,17 +107,21 @@ The first single-model competitive runner compares one `LSLCoreModel` against a
 trainable CPU NumPy Transformer on the same tokenizer and token budget:
 
 ```bash
-python benchmarks/competitive/run_lsl_vs_transformer.py --dataset tinystories --tokens 100000
-python benchmarks/competitive/run_lsl_vs_transformer.py --dataset wikitext2 --tokens 100000
+python benchmarks/competitive/run_lsl_vs_transformer.py --dataset tinystories --tokens 100000 --lsl-profile native_fast
+python benchmarks/competitive/run_lsl_vs_transformer.py --dataset wikitext2 --tokens 100000 --lsl-profile native_fast
 ```
 
 By default this is descriptive, not a strict claim gate. Add `--claim` to make
 the configured quality/latency/generation thresholds fail the command.
+Use `--lsl-profile native_fast` for maximum C-kernel throughput and
+`--lsl-profile bio_native` when you want one stream to engage the six biological
+mechanisms together: predictive coding, SDR, cortical columns, hippocampal
+replay, neuromodulation, and dendritic computation.
 
 Train and save a single LSLCoreModel checkpoint on a real corpus:
 
 ```bash
-python benchmarks/train_lsl_corpus.py --dataset tinystories --max-tokens 1000000
+python benchmarks/train_lsl_corpus.py --dataset tinystories --max-tokens 1000000 --lsl-profile native_fast
 ```
 
 Then run the interactive demo. On a fresh checkout, `python lsl_chat.py` also
@@ -125,7 +129,7 @@ bootstraps a small local TinyStories checkpoint automatically if this file is
 missing:
 
 ```bash
-python lsl_chat.py --checkpoint checkpoints/lsl_tinystories.json
+python lsl_chat.py --checkpoint checkpoints/lsl_tinystories.json --lsl-profile bio_native
 ```
 
 The chat path uses the native C sparse transition head when

@@ -43,7 +43,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tokenizer-train-chars", type=int, default=250000)
     parser.add_argument("--vocab-size", type=int, default=8000)
     parser.add_argument("--candidate-cap", type=int, default=128)
-    parser.add_argument("--lsl-profile", choices=["full", "native_long_context", "native_fast"], default="native_fast")
+    parser.add_argument("--lsl-profile", choices=["full", "native_long_context", "native_fast", "bio_native"], default="native_fast")
     parser.add_argument("--checkpoint", type=str, default=None)
     parser.add_argument("--json-output", type=str, default=None)
     parser.add_argument("--seed", type=int, default=42)
