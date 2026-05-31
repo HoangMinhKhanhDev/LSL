@@ -229,6 +229,34 @@ class CorticalColumnSequenceMemory:
 
         self.temporal_segments[key][target] += strength
 
+    def prune_memory(self, max_segments=None, max_context_keys=None, max_targets_per_context=None):
+        removed = 0
+        if max_targets_per_context is not None:
+            limit = max(1, int(max_targets_per_context))
+            for key, targets in list(self.context_transitions.items()):
+                if len(targets) <= limit:
+                    continue
+                ranked = sorted(targets.items(), key=lambda item: (-float(item[1]), int(item[0])))[:limit]
+                removed += len(targets) - len(ranked)
+                self.context_transitions[key] = dict(ranked)
+        if max_context_keys is not None:
+            limit = max(1, int(max_context_keys))
+            while len(self.context_transitions) > limit:
+                self.context_transitions.pop(next(iter(self.context_transitions)))
+                removed += 1
+        if max_segments is not None:
+            limit = max(1, int(max_segments))
+            if len(self.temporal_segments) > limit:
+                ranked_segments = sorted(
+                    self.temporal_segments.items(),
+                    key=lambda item: sum(float(v) for v in item[1].values()),
+                    reverse=True,
+                )[:limit]
+                removed += len(self.temporal_segments) - len(ranked_segments)
+                self.temporal_segments = dict(ranked_segments)
+                self.segment_count = len(self.temporal_segments)
+        return removed
+
     def forward(self, token_id, learn=True):
         """Process a token and update sequence memory.
 

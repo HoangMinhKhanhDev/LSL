@@ -264,6 +264,23 @@ class HippocampalMemory:
             self.replay_count += 1
         return budget
 
+    def prune(self, max_fast: Optional[int] = None, max_slow: Optional[int] = None) -> int:
+        removed = 0
+        if max_fast is not None:
+            while len(self.fast) > int(max_fast):
+                self.fast.pop(next(iter(self.fast)))
+                removed += 1
+        if max_slow is not None:
+            while len(self.slow) > int(max_slow):
+                self.slow.pop(next(iter(self.slow)))
+                removed += 1
+        if removed:
+            self.feature_buckets.clear()
+            for key in list(self.fast.keys()) + list(self.slow.keys()):
+                for feature in key:
+                    self.feature_buckets[feature].append(key)
+        return removed
+
     def recall(self, cue_features: Iterable[str]) -> Optional[str]:
         cues = tuple(sorted(_norm(f) for f in cue_features if str(f).strip()))
         if not cues:
@@ -501,6 +518,36 @@ class DendriticLayer:
             branch.branch_id = idx
             for bit in branch.active_bits:
                 self._bit_to_branch_ids[int(bit)].append(idx)
+
+    def _rebuild_indexes(self) -> None:
+        self._branch_index = {}
+        self._bit_to_branch_ids = defaultdict(list)
+        for idx, branch in enumerate(self.branches):
+            branch.branch_id = idx
+            key = (int(branch.output), tuple(branch.active_bits))
+            self._branch_index[key] = branch
+            for bit in branch.active_bits:
+                self._bit_to_branch_ids[int(bit)].append(idx)
+
+    def prune_branches(self, max_branches: int) -> int:
+        max_branches = int(max_branches)
+        if max_branches <= 0 or len(self.branches) <= max_branches:
+            return 0
+        ranked = sorted(
+            self.branches,
+            key=lambda branch: (
+                int(branch.local_update_count),
+                float(branch.strength),
+                float(branch.last_activation),
+                -int(branch.branch_id),
+            ),
+            reverse=True,
+        )
+        kept = ranked[:max_branches]
+        removed = len(self.branches) - len(kept)
+        self.branches[:] = kept
+        self._rebuild_indexes()
+        return removed
 
     def observe(self, bits: Iterable[int], output: int) -> None:
         if isinstance(bits, tuple):

@@ -17,6 +17,7 @@ def main():
     run("benchmark_pc_phase2.py")
     run("benchmark_cortical_column_sequence.py")
     run("test_lsl_core_model.py")
+    run("test_lsl_limitations_improvements.py")
     run("test_extreme_strict_infra.py")
     run("benchmark_goal_strict.py", "--profile", "smoke")
     run("benchmark_goal_strict.py")

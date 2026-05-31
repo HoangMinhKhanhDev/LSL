@@ -45,6 +45,14 @@ class LSLCoreConfig:
     bio_dendrite_weight: float = 0.75
     bio_column_weight: float = 1.25
     bio_hippocampus_weight: float = 1.0
+    bio_generation_candidate_limit: int = 32
+    bio_maintenance_interval: int = 4096
+    bio_dendrite_max_branches: int = 65536
+    bio_column_max_segments: int = 65536
+    bio_column_max_contexts: int = 65536
+    bio_column_max_targets_per_context: int = 16
+    bio_hippocampus_max_fast: int = 65536
+    bio_hippocampus_max_slow: int = 65536
 
 
 class LSLCoreModel:
@@ -93,6 +101,8 @@ class LSLCoreModel:
             "neuromod_steps": 0.0,
             "dendrite_writes": 0.0,
             "dendrite_votes": 0.0,
+            "maintenance_runs": 0.0,
+            "maintenance_pruned": 0.0,
         }
         self._bio_sdr_cache: Dict[int, Tuple[int, ...]] = {}
         self._bio_dendrite_cache: Dict[int, Tuple[int, ...]] = {}
@@ -154,6 +164,8 @@ class LSLCoreModel:
             "neuromod_steps": 0.0,
             "dendrite_writes": 0.0,
             "dendrite_votes": 0.0,
+            "maintenance_runs": 0.0,
+            "maintenance_pruned": 0.0,
         }.items():
             self.bio_native_stats.setdefault(key, value)
         self._runtime_profile_name = self._runtime_profile_from_config(self.config)
@@ -393,6 +405,28 @@ class LSLCoreModel:
                 self.agent.consolidate(replay_fraction=self.config.consolidation_fraction)
             )
 
+    def _bio_runtime_maintenance(self) -> None:
+        pruned = 0
+        if getattr(self.agent, "use_dendrites", False):
+            pruned += int(self.agent.dendrites.prune_branches(int(self.config.bio_dendrite_max_branches)))
+        if getattr(self.agent, "use_columns", False):
+            pruned += int(
+                self.agent.columns.prune_memory(
+                    max_segments=int(self.config.bio_column_max_segments),
+                    max_context_keys=int(self.config.bio_column_max_contexts),
+                    max_targets_per_context=int(self.config.bio_column_max_targets_per_context),
+                )
+            )
+        if getattr(self.agent, "use_hippocampus", False):
+            pruned += int(
+                self.agent.hippocampus.prune(
+                    max_fast=int(self.config.bio_hippocampus_max_fast),
+                    max_slow=int(self.config.bio_hippocampus_max_slow),
+                )
+            )
+        self.bio_native_stats["maintenance_runs"] += 1.0
+        self.bio_native_stats["maintenance_pruned"] += float(pruned)
+
     def _observe_token_bio_native(self, token: int, learn: bool) -> None:
         prev = self.prev_token
         surprise = 1.0
@@ -513,6 +547,12 @@ class LSLCoreModel:
             self._observe_token_bio_native(token, learn=learn)
             self.prev_token = token
             self.seen_tokens += 1
+            if (
+                learn
+                and int(self.config.bio_maintenance_interval) > 0
+                and self.seen_tokens % int(self.config.bio_maintenance_interval) == 0
+            ):
+                self._bio_runtime_maintenance()
             self.agent.generator = None
             return
         if learn and self.prev_token is not None:
@@ -628,6 +668,20 @@ class LSLCoreModel:
             native_token, native_score = self._native_predict(current)
             if native_token is not None:
                 votes[int(native_token)] += max(0.01, float(native_score)) * float(self.config.native_score_weight)
+            use_generation_context = len(tokens) > 1
+            if use_generation_context:
+                self.agent.long_context.reset_state()
+                for history_token in tokens[:-1][-int(self.agent.long_context.context_width):]:
+                    self.agent.long_context.advance_context(int(history_token))
+                limit = min(int(self.config.bio_generation_candidate_limit), int(self.config.candidate_cap))
+                for rank, candidate in enumerate(self.agent.long_context.next_candidates(current, limit=limit)):
+                    prob = self.agent.long_context.target_probability(
+                        current,
+                        int(candidate),
+                        vocab_size=self.vocab_size,
+                        update_context=False,
+                    )
+                    votes[int(candidate)] += 1.15 * float(prob) + 0.20 / float(rank + 1)
             agent_token = self.agent.predict_next_token_id(tokens)
             if agent_token is not None:
                 votes[int(agent_token)] += float(self.config.bio_column_weight)
@@ -643,6 +697,24 @@ class LSLCoreModel:
                 self.bio_native_stats["dendrite_votes"] += 1.0
             if not votes:
                 return None
+            if use_generation_context:
+                unk_id = getattr(self.tokenizer, "word_to_id", getattr(self.tokenizer, "token_to_id", {})).get("<UNK>", 1)
+                recent = [int(token) for token in tokens[-96:]]
+                recent_counts = Counter(recent)
+                seen_trigrams = {
+                    tuple(int(x) for x in recent[idx:idx + 3])
+                    for idx in range(max(0, len(recent) - 2))
+                }
+                last_two = tuple(recent[-2:]) if len(recent) >= 2 else ()
+                for candidate in list(votes.keys()):
+                    candidate = int(candidate)
+                    if candidate == int(unk_id):
+                        votes[candidate] -= 2.0
+                    votes[candidate] -= 0.18 * min(8, recent_counts.get(candidate, 0))
+                    if len(last_two) == 2 and (last_two[0], last_two[1], candidate) in seen_trigrams:
+                        votes[candidate] -= 4.0
+                    if recent and candidate == recent[-1]:
+                        votes[candidate] -= 0.75
             return int(max(votes.items(), key=lambda item: (item[1], -item[0]))[0])
         votes: Dict[int, float] = {}
         native_token, native_score = self._native_predict(tokens[-1])
