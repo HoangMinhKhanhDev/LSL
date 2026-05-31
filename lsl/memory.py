@@ -8,6 +8,9 @@ import numpy as np
 from collections import defaultdict, deque
 from typing import Dict, List, Optional, Tuple
 
+from . import sparse_native
+from .sparse_native import NATIVE_AVAILABLE
+
 
 class SparseKeyValueMemory:
     """Sparse content-addressable key/value memory with bounded candidates."""
@@ -118,6 +121,7 @@ class SparseKeyValueMemory:
         top_k: int = 1,
         return_diagnostics: bool = False,
         allow_direct_lookup: bool = True,
+        prefer_native_scoring: bool = True,
     ):
         if not self._records:
             self.last_candidate_count = 0
@@ -204,9 +208,35 @@ class SparseKeyValueMemory:
             self.last_best_score = 0
             return (None, self.diagnostics()) if return_diagnostics else None
 
-        query_set = set(signature)
         best_slot = candidates[0]
         best_score = -1
+        if prefer_native_scoring and NATIVE_AVAILABLE and len(candidates) > 0:
+            max_width = max(len(self._records[slot][0]) for slot in candidates)
+            packed = np.full((len(candidates), max_width), -1, dtype=np.intp)
+            lengths = np.zeros(len(candidates), dtype=np.intp)
+            values = np.zeros(len(candidates), dtype=np.intp)
+            for idx, slot in enumerate(candidates):
+                candidate_sig, candidate_value, _ = self._records[slot]
+                lengths[idx] = len(candidate_sig)
+                values[idx] = int(candidate_value)
+                packed[idx, : len(candidate_sig)] = np.asarray(candidate_sig, dtype=np.intp)
+            try:
+                native = sparse_native.best_signature_match(np.asarray(signature, dtype=np.intp), packed, lengths, values)
+                position = int(native.get("best_position", -1))
+                if 0 <= position < len(candidates):
+                    best_slot = candidates[position]
+                    best_score = int(native.get("best_score", -1))
+                    self.last_candidate_count = len(candidates)
+                    self.last_bucket_count = min(self.bucket_probe_bits, len(signature))
+                    self.last_full_scan = False
+                    self.last_similarity_ops = int(native.get("ops", len(candidates) * self.k))
+                    self.last_best_score = int(best_score)
+                    value = self._records[best_slot][1]
+                    return (value, self.diagnostics()) if return_diagnostics else value
+            except RuntimeError:
+                pass
+
+        query_set = set(signature)
         for slot in candidates:
             candidate_sig, _, _ = self._records[slot]
             score = sum(1 for bit in candidate_sig if bit in query_set)
@@ -228,6 +258,7 @@ class SparseKeyValueMemory:
             "candidate_cap": float(self.candidate_cap),
             "sdr_dim": float(self.sdr_dim),
             "k": float(self.k),
+            "native_lookup_available": float(NATIVE_AVAILABLE),
         }
 
     def clear(self) -> None:

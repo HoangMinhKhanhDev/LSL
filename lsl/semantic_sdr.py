@@ -20,6 +20,7 @@ Constraints enforced:
   - No external libraries (numpy only)
 """
 import json
+import math
 from pathlib import Path
 
 import numpy as np
@@ -304,6 +305,96 @@ class SemanticSDREncoder:
         """Overlap normalised by k (fraction of bits shared)."""
         ov = self.semantic_overlap(token_id_a, token_id_b)
         return ov / max(1.0, float(self.k))
+
+    def cosine_similarity(self, token_id_a: int, token_id_b: int) -> float:
+        a = self._embeddings[int(token_id_a) % self.vocab_size]
+        b = self._embeddings[int(token_id_b) % self.vocab_size]
+        denom = float(np.linalg.norm(a) * np.linalg.norm(b)) + 1e-9
+        return float(np.dot(a, b) / denom)
+
+    def nearest_neighbors(self, token_id: int, top_k: int = 8, exclude_self: bool = True) -> List[Tuple[int, float]]:
+        token_id = int(token_id) % self.vocab_size
+        query = self._embeddings[token_id]
+        norms = np.linalg.norm(self._embeddings, axis=1) + 1e-9
+        scores = (self._embeddings @ query) / norms
+        if exclude_self:
+            scores[token_id] = -np.inf
+        k = max(1, min(int(top_k), self.vocab_size))
+        idx = np.argpartition(scores, -k)[-k:]
+        idx = idx[np.argsort(scores[idx])[::-1]]
+        return [(int(i), float(scores[i])) for i in idx]
+
+    def analogy(self, token_a: int, token_b: int, token_c: int, top_k: int = 1) -> List[Tuple[int, float]]:
+        vec = self._embeddings[int(token_b) % self.vocab_size] - self._embeddings[int(token_a) % self.vocab_size] + self._embeddings[int(token_c) % self.vocab_size]
+        norms = np.linalg.norm(self._embeddings, axis=1) + 1e-9
+        scores = (self._embeddings @ vec) / norms
+        for idx in {int(token_a) % self.vocab_size, int(token_b) % self.vocab_size, int(token_c) % self.vocab_size}:
+            scores[idx] = -np.inf
+        k = max(1, min(int(top_k), self.vocab_size))
+        idx = np.argpartition(scores, -k)[-k:]
+        idx = idx[np.argsort(scores[idx])[::-1]]
+        return [(int(i), float(scores[i])) for i in idx]
+
+    def learned_bucket(self, token_id: int, bucket_bits: int = 16) -> int:
+        bits = self.active_indices(token_id)
+        bucket_bits = max(1, min(int(bucket_bits), len(bits)))
+        value = 0
+        for bit in bits[:bucket_bits]:
+            value = (value * 1315423911 + int(bit) + 1) & 0xFFFFFFFF
+        return int(value)
+
+    def debug_visualize(self, token_id: int, width: int = 64) -> str:
+        bits = self.active_indices(token_id)
+        width = max(8, int(width))
+        rows = int(math.ceil(self.sdr_dim / width))
+        grid = [["." for _ in range(width)] for _ in range(rows)]
+        for bit in bits:
+            r = int(bit) // width
+            c = int(bit) % width
+            if 0 <= r < rows:
+                grid[r][c] = "#"
+        return "\n".join("".join(row) for row in grid)
+
+    def collision_rate(self, sample_ids: List[int], seed: int = 0) -> float:
+        del seed
+        seen = {}
+        collisions = 0
+        for token_id in sample_ids:
+            key = tuple(self.active_indices(int(token_id)))
+            if key in seen and seen[key] != int(token_id):
+                collisions += 1
+            else:
+                seen[key] = int(token_id)
+        return collisions / max(1, len(sample_ids))
+
+    def noisy_recall(self, token_id: int, drop_rate: float = 0.4, trials: int = 32) -> float:
+        rng = np.random.default_rng(int(token_id) + 7)
+        token_id = int(token_id) % self.vocab_size
+        base = self.encode(token_id)
+        active = np.where(base > 0.5)[0]
+        if len(active) == 0:
+            return 0.0
+        hits = 0
+        for _ in range(int(trials)):
+            keep = max(1, int(round(len(active) * (1.0 - float(drop_rate)))))
+            kept = np.sort(rng.choice(active, size=keep, replace=False))
+            best = None
+            best_score = -1
+            for candidate in range(self.vocab_size):
+                score = len(set(kept) & set(self.active_indices(candidate)))
+                if score > best_score:
+                    best_score = score
+                    best = candidate
+            hits += int(best == token_id)
+        return hits / max(1, int(trials))
+
+    def reconstruction_accuracy(self, token_ids: List[int], drop_rates: List[float] = None) -> Dict[str, float]:
+        drop_rates = drop_rates or [0.2, 0.4, 0.6]
+        result = {}
+        for drop in drop_rates:
+            accuracies = [self.noisy_recall(int(tid), drop_rate=float(drop), trials=8) for tid in token_ids]
+            result[f"drop_{int(drop * 100)}"] = float(np.mean(accuracies)) if accuracies else 0.0
+        return result
 
     def random_baseline_overlap(self, n_pairs: int = 1000, seed: int = 0) -> float:
         """Expected overlap for two random SDRs in this space.

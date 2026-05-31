@@ -19,6 +19,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
+from .sparse_native import simple_tokenize as native_simple_tokenize
 from .text_normalization import normalize_text
 
 
@@ -68,7 +69,11 @@ class SimpleSubwordTokenizer:
         )
 
     def _words(self, text: str) -> List[str]:
-        return re.findall(r"\w+|[^\w\s]", self._normalize_text(text, lowercase=True), re.UNICODE)
+        normalized = self._normalize_text(text, lowercase=False)
+        try:
+            return list(native_simple_tokenize(normalized))
+        except Exception:
+            return re.findall(r"\w+|[^\w\s]", self._normalize_text(text, lowercase=True), re.UNICODE)
 
     def _initial_units(self, word: str) -> Tuple[str, ...]:
         if re.match(r"^\w+$", word, re.UNICODE):
@@ -218,9 +223,12 @@ class SimpleSubwordTokenizer:
         self._cache_misses += 1
         unk = self.token_to_id.get("<UNK>", 1)
         ids: List[int] = []
-        words = re.finditer(r"\w+|[^\w\s]", normalized, re.UNICODE)
-        for match in words:
-            ids.extend(self._encode_word(match.group(0), unk))
+        try:
+            words = native_simple_tokenize(normalized, max_tokens=max_tokens)
+        except Exception:
+            words = [match.group(0) for match in re.finditer(r"\w+|[^\w\s]", normalized, re.UNICODE)]
+        for word in words:
+            ids.extend(self._encode_word(word, unk))
             if max_tokens is not None and len(ids) >= int(max_tokens):
                 ids = ids[: int(max_tokens)]
                 break

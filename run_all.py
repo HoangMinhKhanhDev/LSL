@@ -20,6 +20,7 @@ def main():
     run("test_lsl_limitations_improvements.py")
     run("test_phase1_foundation.py")
     run("test_tokenizer_checkpoint_native.py")
+    run("test_native_kernels.py")
     run("test_extreme_strict_infra.py")
     run("benchmark_goal_strict.py", "--profile", "smoke")
     run("benchmark_goal_strict.py")

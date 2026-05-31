@@ -336,15 +336,15 @@ class CorticalColumnSequenceMemory:
 
         return scores
 
-    def topk_prediction_indices(self, scores, top_k=3):
+    def topk_prediction_indices(self, scores, top_k=3, prefer_native: bool = True):
         limit = max(1, int(top_k))
-        if NATIVE_AVAILABLE:
+        if prefer_native and NATIVE_AVAILABLE:
             self.native_topk_calls += 1
             try:
                 result = sparse_native.topk_float32(scores, limit)
                 self.native_topk_success += 1
                 return [int(idx) for idx in result.get("indices", [])]
-            except RuntimeError:
+            except Exception:
                 pass
         return [int(idx) for idx in np.argsort(scores)[-limit:][::-1]]
 

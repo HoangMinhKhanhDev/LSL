@@ -623,9 +623,9 @@ class DendriticLayer:
                 self.last_active_branches += 1
         return activations
 
-    def predict(self, bits: Iterable[int]) -> Optional[int]:
+    def predict(self, bits: Iterable[int], prefer_native: bool = True) -> Optional[int]:
         active = {int(bit) % self.input_dim for bit in bits}
-        if self._ensure_native_pack():
+        if prefer_native and self._ensure_native_pack():
             self.native_predict_calls += 1
             try:
                 stats = sparse_native.dendrite_predict(
@@ -642,7 +642,7 @@ class DendriticLayer:
                 best = int(stats.get("best_output", -1))
                 self.native_predict_success += 1
                 return best if best >= 0 else None
-            except RuntimeError:
+            except Exception:
                 pass
         votes = Counter()
         self.last_ops = 0

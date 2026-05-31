@@ -440,13 +440,20 @@ def phase3_targets():
 
     lengths = [100, 1000, 10000, 50000]
     times = []
+    warmup = min(32, len(ids))
+    repeats = 3
     for n in lengths:
-        model.reset_state()
         sample = (ids * ((n // len(ids)) + 1))[:n]
-        t0 = time.perf_counter_ns()
-        for token in sample:
-            model.forward(token, learn=False)
-        times.append((time.perf_counter_ns() - t0) / 1000.0 / max(1, n))
+        per_token = []
+        for _ in range(repeats):
+            model.reset_state()
+            for token in sample[:warmup]:
+                model.forward(token, learn=False)
+            t0 = time.perf_counter_ns()
+            for token in sample:
+                model.forward(token, learn=False)
+            per_token.append((time.perf_counter_ns() - t0) / 1000.0 / max(1, n))
+        times.append(float(np.median(per_token)))
     ratio = max(times) / max(min(times), 1e-9)
     g35 = result_for(SPECS["G3.5"], ratio <= 1.20, ratio, f"lengths={lengths}, us_per_token={times}")
 

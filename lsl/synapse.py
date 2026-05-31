@@ -110,19 +110,38 @@ class LivingSynapseLayer:
                 "fatigue_touched": 0,
             }
         elif sparse_native.NATIVE_AVAILABLE:
-            post, stats = sparse_native.forward_active(
-                self.W_slow,
-                self.W_live,
-                self.fatigue,
-                active,
-                x_active,
-            )
-            self.last_forward_ops = {
-                "mode": stats.get("mode", "native_sparse_active"),
-                "ops": int(stats.get("ops", self.out_dim * len(active))),
-                "active_inputs": int(stats.get("active_inputs", len(active))),
-                "fatigue_touched": int(stats.get("touched", self.out_dim * len(active))),
-            }
+            try:
+                post, stats = sparse_native.forward_active(
+                    self.W_slow,
+                    self.W_live,
+                    self.fatigue,
+                    active,
+                    x_active,
+                )
+                self.last_forward_ops = {
+                    "mode": stats.get("mode", "native_sparse_active"),
+                    "ops": int(stats.get("ops", self.out_dim * len(active))),
+                    "active_inputs": int(stats.get("active_inputs", len(active))),
+                    "fatigue_touched": int(stats.get("touched", self.out_dim * len(active))),
+                }
+            except Exception:
+                fatigue_cols = self.fatigue[:, active]
+                W_cols = (
+                    self.W_slow[:, active] + self.W_live[:, active]
+                ) * (1.0 - fatigue_cols)
+                post = W_cols @ x_active
+                max_s = float(np.max(np.abs(post))) + 1e-8
+                updated_fatigue = (
+                    0.98 * fatigue_cols
+                    + 0.02 * np.abs(post[:, None] * x_active[None, :]) / max_s
+                )
+                self.fatigue[:, active] = np.clip(updated_fatigue, 0.0, 0.9)
+                self.last_forward_ops = {
+                    "mode": "sparse_active_fallback",
+                    "ops": int(self.out_dim * len(active)),
+                    "active_inputs": int(len(active)),
+                    "fatigue_touched": int(self.out_dim * len(active)),
+                }
         else:
             fatigue_cols = self.fatigue[:, active]
             W_cols = (
@@ -180,33 +199,36 @@ class LivingSynapseLayer:
         values = self._active_values()
         post = self._last_post
         if sparse_native.NATIVE_AVAILABLE and len(active) > 0:
-            stats = sparse_native.hebbian_update_active(
-                self.W_live,
-                active,
-                values,
-                post,
-                float(modulator),
-                float(lr),
-                float(decay),
-                float(max_norm),
-            )
-            self.last_update_ops = {
-                "mode": stats.get("mode", "native_sparse_active_hebbian"),
-                "ops": int(stats.get("ops", self.out_dim * len(active))),
-                "active_inputs": int(stats.get("active_inputs", len(active))),
-                "weights_touched": int(stats.get("touched", self.out_dim * len(active))),
-            }
-        else:
-            self.W_live[:, active] *= (1.0 - lr * decay)
-            for i, c in enumerate(active):
-                self.W_live[:, c] += lr * float(modulator) * post * values[i]
-            self._clip_active_columns(active, max_norm)
-            self.last_update_ops = {
-                "mode": "sparse_active_hebbian",
-                "ops": int(self.out_dim * len(active)),
-                "active_inputs": int(len(active)),
-                "weights_touched": int(self.out_dim * len(active)),
-            }
+            try:
+                stats = sparse_native.hebbian_update_active(
+                    self.W_live,
+                    active,
+                    values,
+                    post,
+                    float(modulator),
+                    float(lr),
+                    float(decay),
+                    float(max_norm),
+                )
+                self.last_update_ops = {
+                    "mode": stats.get("mode", "native_sparse_active_hebbian"),
+                    "ops": int(stats.get("ops", self.out_dim * len(active))),
+                    "active_inputs": int(stats.get("active_inputs", len(active))),
+                    "weights_touched": int(stats.get("touched", self.out_dim * len(active))),
+                }
+                return
+            except Exception:
+                pass
+        self.W_live[:, active] *= (1.0 - lr * decay)
+        for i, c in enumerate(active):
+            self.W_live[:, c] += lr * float(modulator) * post * values[i]
+        self._clip_active_columns(active, max_norm)
+        self.last_update_ops = {
+            "mode": "sparse_active_hebbian",
+            "ops": int(self.out_dim * len(active)),
+            "active_inputs": int(len(active)),
+            "weights_touched": int(self.out_dim * len(active)),
+        }
 
     def supervised_local_update_active(self, error_signal, lr=0.05, decay=0.001,
                                        max_norm=12.0):
@@ -233,7 +255,7 @@ class LivingSynapseLayer:
                     "weights_touched": int(stats.get("touched", self.out_dim * len(active))),
                 }
                 return
-            except RuntimeError:
+            except Exception:
                 pass
         self.W_live[:, active] *= (1.0 - lr * decay)
         for i, c in enumerate(active):
@@ -272,7 +294,7 @@ class LivingSynapseLayer:
                     "weights_touched": int(stats.get("touched", len(active))),
                 }
                 return
-            except RuntimeError:
+            except Exception:
                 pass
         scale = 1.0 - float(lr) * float(decay)
         self.W_live[target, active] *= scale

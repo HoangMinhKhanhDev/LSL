@@ -479,6 +479,301 @@ static int contains_active(PyArrayObject *active, npy_intp active_count, npy_int
 }
 
 
+static int is_word_char(Py_UCS4 ch) {
+    return Py_UNICODE_ISALNUM(ch) || ch == '_';
+}
+
+
+static PyObject *simple_tokenize(PyObject *self, PyObject *args) {
+    PyObject *text_obj;
+    Py_ssize_t max_tokens = -1;
+    if (!PyArg_ParseTuple(args, "O|n", &text_obj, &max_tokens)) {
+        return NULL;
+    }
+
+    PyObject *text = PyObject_Str(text_obj);
+    if (!text) {
+        return NULL;
+    }
+    PyObject *lower = PyObject_CallMethod(text, "lower", NULL);
+    Py_DECREF(text);
+    if (!lower) {
+        return NULL;
+    }
+    if (!PyUnicode_Check(lower)) {
+        Py_DECREF(lower);
+        PyErr_SetString(PyExc_TypeError, "simple_tokenize expects a unicode string");
+        return NULL;
+    }
+
+    Py_ssize_t length = PyUnicode_GetLength(lower);
+    int kind = PyUnicode_KIND(lower);
+    const void *data = PyUnicode_DATA(lower);
+    PyObject *out = PyList_New(0);
+    if (!out) {
+        Py_DECREF(lower);
+        return NULL;
+    }
+
+    Py_ssize_t i = 0;
+    while (i < length) {
+        if (max_tokens >= 0 && PyList_GET_SIZE(out) >= max_tokens) {
+            break;
+        }
+        Py_UCS4 ch = PyUnicode_READ(kind, data, i);
+        if (Py_UNICODE_ISSPACE(ch)) {
+            i++;
+            continue;
+        }
+        Py_ssize_t start = i;
+        if (is_word_char(ch)) {
+            i++;
+            while (i < length) {
+                ch = PyUnicode_READ(kind, data, i);
+                if (!is_word_char(ch)) {
+                    break;
+                }
+                i++;
+            }
+        } else {
+            i++;
+        }
+        PyObject *token = PyUnicode_Substring(lower, start, i);
+        if (!token) {
+            Py_DECREF(out);
+            Py_DECREF(lower);
+            return NULL;
+        }
+        if (PyList_Append(out, token) < 0) {
+            Py_DECREF(token);
+            Py_DECREF(out);
+            Py_DECREF(lower);
+            return NULL;
+        }
+        Py_DECREF(token);
+    }
+    Py_DECREF(lower);
+    return out;
+}
+
+
+static PyObject *best_signature_match(PyObject *self, PyObject *args) {
+    PyObject *query_obj;
+    PyObject *signatures_obj;
+    PyObject *lengths_obj;
+    PyObject *values_obj;
+    if (!PyArg_ParseTuple(args, "OOOO", &query_obj, &signatures_obj, &lengths_obj, &values_obj)) {
+        return NULL;
+    }
+
+    PyArrayObject *query = (PyArrayObject *)PyArray_FROM_OTF(query_obj, NPY_INTP, NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_ALIGNED);
+    PyArrayObject *signatures = (PyArrayObject *)PyArray_FROM_OTF(signatures_obj, NPY_INTP, NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_ALIGNED);
+    PyArrayObject *lengths = (PyArrayObject *)PyArray_FROM_OTF(lengths_obj, NPY_INTP, NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_ALIGNED);
+    PyArrayObject *values = (PyArrayObject *)PyArray_FROM_OTF(values_obj, NPY_INTP, NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_ALIGNED);
+
+    if (!query || !signatures || !lengths || !values) {
+        Py_XDECREF(query);
+        Py_XDECREF(signatures);
+        Py_XDECREF(lengths);
+        Py_XDECREF(values);
+        return NULL;
+    }
+    if (PyArray_NDIM(query) != 1 || PyArray_NDIM(signatures) != 2 || PyArray_NDIM(lengths) != 1 || PyArray_NDIM(values) != 1) {
+        PyErr_SetString(PyExc_ValueError, "invalid signature arrays");
+        goto match_fail;
+    }
+
+    npy_intp candidate_count = PyArray_DIM(signatures, 0);
+    npy_intp width = PyArray_DIM(signatures, 1);
+    npy_intp active_count = PyArray_DIM(query, 0);
+    if (PyArray_DIM(lengths, 0) != candidate_count || PyArray_DIM(values, 0) != candidate_count) {
+        PyErr_SetString(PyExc_ValueError, "candidate arrays must have the same length");
+        goto match_fail;
+    }
+
+    npy_intp best_position = -1;
+    npy_intp best_value = -1;
+    npy_intp best_score = -1;
+    npy_intp ops = 0;
+    for (npy_intp i = 0; i < candidate_count; i++) {
+        npy_intp length = *(npy_intp *)PyArray_GETPTR1(lengths, i);
+        if (length < 0) {
+            length = 0;
+        }
+        if (length > width) {
+            length = width;
+        }
+        npy_intp score = 0;
+        for (npy_intp j = 0; j < length; j++) {
+            npy_intp bit = *(npy_intp *)PyArray_GETPTR2(signatures, i, j);
+            if (bit < 0) {
+                continue;
+            }
+            ops += 1;
+            if (contains_active(query, active_count, bit)) {
+                score += 1;
+            }
+        }
+        if (score > best_score) {
+            best_score = score;
+            best_position = i;
+            best_value = *(npy_intp *)PyArray_GETPTR1(values, i);
+        }
+    }
+
+    PyObject *stats = Py_BuildValue(
+        "{s:s,s:n,s:n,s:n,s:n,s:n}",
+        "mode", "native_best_signature_match",
+        "best_position", best_position,
+        "best_value", best_value,
+        "best_score", best_score,
+        "candidate_count", candidate_count,
+        "ops", ops
+    );
+    Py_DECREF(query);
+    Py_DECREF(signatures);
+    Py_DECREF(lengths);
+    Py_DECREF(values);
+    return stats;
+
+match_fail:
+    Py_XDECREF(query);
+    Py_XDECREF(signatures);
+    Py_XDECREF(lengths);
+    Py_XDECREF(values);
+    return NULL;
+}
+
+
+static PyObject *forward_active_batch(PyObject *self, PyObject *args) {
+    PyObject *slow_obj;
+    PyObject *live_obj;
+    PyObject *fatigue_obj;
+    PyObject *active_obj;
+    PyObject *values_obj;
+    PyObject *lengths_obj;
+    if (!PyArg_ParseTuple(args, "OOOOOO", &slow_obj, &live_obj, &fatigue_obj, &active_obj, &values_obj, &lengths_obj)) {
+        return NULL;
+    }
+
+    PyArrayObject *slow = (PyArrayObject *)PyArray_FROM_OTF(slow_obj, NPY_FLOAT32, NPY_ARRAY_ALIGNED);
+    PyArrayObject *live = (PyArrayObject *)PyArray_FROM_OTF(live_obj, NPY_FLOAT32, NPY_ARRAY_ALIGNED);
+    PyArrayObject *fatigue = (PyArrayObject *)PyArray_FROM_OTF(fatigue_obj, NPY_FLOAT32, NPY_ARRAY_ALIGNED | NPY_ARRAY_WRITEABLE);
+    PyArrayObject *active = (PyArrayObject *)PyArray_FROM_OTF(active_obj, NPY_INTP, NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_ALIGNED);
+    PyArrayObject *values = (PyArrayObject *)PyArray_FROM_OTF(values_obj, NPY_FLOAT32, NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_ALIGNED);
+    PyArrayObject *lengths = (PyArrayObject *)PyArray_FROM_OTF(lengths_obj, NPY_INTP, NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_ALIGNED);
+
+    if (!slow || !live || !fatigue || !active || !values || !lengths) {
+        Py_XDECREF(slow);
+        Py_XDECREF(live);
+        Py_XDECREF(fatigue);
+        Py_XDECREF(active);
+        Py_XDECREF(values);
+        Py_XDECREF(lengths);
+        return NULL;
+    }
+    if (PyArray_NDIM(slow) != 2 || PyArray_NDIM(live) != 2 || PyArray_NDIM(fatigue) != 2 ||
+        PyArray_NDIM(active) != 2 || PyArray_NDIM(values) != 2 || PyArray_NDIM(lengths) != 1) {
+        PyErr_SetString(PyExc_ValueError, "invalid batch array dimensions");
+        goto batch_fail;
+    }
+
+    npy_intp batch = PyArray_DIM(active, 0);
+    npy_intp width = PyArray_DIM(active, 1);
+    npy_intp out_dim = PyArray_DIM(slow, 0);
+    npy_intp in_dim = PyArray_DIM(slow, 1);
+    if (PyArray_DIM(live, 0) != out_dim || PyArray_DIM(live, 1) != in_dim ||
+        PyArray_DIM(fatigue, 0) != out_dim || PyArray_DIM(fatigue, 1) != in_dim ||
+        PyArray_DIM(values, 0) != batch || PyArray_DIM(values, 1) != width ||
+        PyArray_DIM(lengths, 0) != batch) {
+        PyErr_SetString(PyExc_ValueError, "batch array shapes do not match");
+        goto batch_fail;
+    }
+
+    npy_intp out_shape[2] = {batch, out_dim};
+    PyArrayObject *post = (PyArrayObject *)PyArray_SimpleNew(2, out_shape, NPY_FLOAT32);
+    if (!post) {
+        goto batch_fail;
+    }
+
+    npy_intp ops = 0;
+    npy_intp touched = 0;
+    for (npy_intp row = 0; row < batch; row++) {
+        npy_intp active_count = *(npy_intp *)PyArray_GETPTR1(lengths, row);
+        if (active_count < 0) {
+            active_count = 0;
+        }
+        if (active_count > width) {
+            active_count = width;
+        }
+        float max_abs = 1.0e-8f;
+        for (npy_intp out = 0; out < out_dim; out++) {
+            float acc = 0.0f;
+            for (npy_intp j = 0; j < active_count; j++) {
+                npy_intp col = *(npy_intp *)PyArray_GETPTR2(active, row, j);
+                if (col < 0 || col >= in_dim) {
+                    Py_DECREF(post);
+                    PyErr_SetString(PyExc_IndexError, "active index out of bounds");
+                    goto batch_fail;
+                }
+                float value = *(float *)PyArray_GETPTR2(values, row, j);
+                float ws = *(float *)PyArray_GETPTR2(slow, out, col);
+                float wl = *(float *)PyArray_GETPTR2(live, out, col);
+                float f = *(float *)PyArray_GETPTR2(fatigue, out, col);
+                acc += (ws + wl) * (1.0f - f) * value;
+                ops += 1;
+                touched += 1;
+            }
+            *(float *)PyArray_GETPTR2(post, row, out) = acc;
+            float a = fabsf(acc);
+            if (a > max_abs) {
+                max_abs = a;
+            }
+        }
+        for (npy_intp out = 0; out < out_dim; out++) {
+            float p = *(float *)PyArray_GETPTR2(post, row, out);
+            for (npy_intp j = 0; j < active_count; j++) {
+                npy_intp col = *(npy_intp *)PyArray_GETPTR2(active, row, j);
+                float value = *(float *)PyArray_GETPTR2(values, row, j);
+                float old = *(float *)PyArray_GETPTR2(fatigue, out, col);
+                float sig = fabsf(p * value) / max_abs;
+                float next = 0.98f * old + 0.02f * sig;
+                if (next < 0.0f) {
+                    next = 0.0f;
+                } else if (next > 0.9f) {
+                    next = 0.9f;
+                }
+                *(float *)PyArray_GETPTR2(fatigue, out, col) = next;
+            }
+        }
+    }
+
+    PyObject *stats = Py_BuildValue(
+        "{s:s,s:n,s:n,s:n}",
+        "mode", "native_sparse_active_batch",
+        "ops", ops,
+        "batch", batch,
+        "touched", touched
+    );
+    Py_DECREF(slow);
+    Py_DECREF(live);
+    Py_DECREF(fatigue);
+    Py_DECREF(active);
+    Py_DECREF(values);
+    Py_DECREF(lengths);
+    return Py_BuildValue("NN", (PyObject *)post, stats);
+
+batch_fail:
+    Py_XDECREF(slow);
+    Py_XDECREF(live);
+    Py_XDECREF(fatigue);
+    Py_XDECREF(active);
+    Py_XDECREF(values);
+    Py_XDECREF(lengths);
+    return NULL;
+}
+
+
 static PyObject *dendrite_predict(PyObject *self, PyObject *args) {
     PyObject *bits_obj;
     PyObject *lengths_obj;
@@ -690,10 +985,13 @@ static PyObject *topk_float32(PyObject *self, PyObject *args) {
 
 static PyMethodDef SparseMethods[] = {
     {"forward_active", forward_active, METH_VARARGS, "Run active-index sparse forward and fatigue update."},
+    {"forward_active_batch", forward_active_batch, METH_VARARGS, "Run sparse forward on a batch of active-index inputs."},
     {"hebbian_update_active", hebbian_update_active, METH_VARARGS, "Run active-index local Hebbian update."},
     {"supervised_update_active", supervised_update_active, METH_VARARGS, "Run active-index local supervised update."},
     {"target_update_active", target_update_active, METH_VARARGS, "Run active-index single-target local update."},
     {"score_active", score_active, METH_VARARGS, "Score active-index input without allocating a full output vector."},
+    {"best_signature_match", best_signature_match, METH_VARARGS, "Score sparse candidate signatures against an active query."},
+    {"simple_tokenize", simple_tokenize, METH_VARARGS, "Tokenize text into lowercase word and punctuation tokens."},
     {"dendrite_predict", dendrite_predict, METH_VARARGS, "Score dendritic branches and return the winning output."},
     {"topk_float32", topk_float32, METH_VARARGS, "Return top-k float32 indices without allocating argsort output."},
     {NULL, NULL, 0, NULL}
