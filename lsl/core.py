@@ -55,6 +55,7 @@ class LSLCoreModel:
             raise ValueError("Pass either config or keyword settings, not both")
         self.config = config or LSLCoreConfig(**kwargs)
         profile = self._runtime_profile_from_config(self.config)
+        self._runtime_profile_name = profile
         full_modules = profile in {"full", "bio_native"}
         self.agent = BioComputeAgent(
             vocab_size=self.config.vocab_size,
@@ -93,8 +94,24 @@ class LSLCoreModel:
             "dendrite_writes": 0.0,
             "dendrite_votes": 0.0,
         }
+        self._bio_sdr_cache: Dict[int, Tuple[int, ...]] = {}
+        self._bio_dendrite_cache: Dict[int, Tuple[int, ...]] = {}
+        self._bio_pc_cache: Dict[int, Tuple[Tuple[int, ...], ...]] = {}
+        self._native_active_cache: Dict[int, np.ndarray] = {}
+        self._native_single_values = np.ones(1, dtype=np.float32)
+        self._runtime_upgraded = True
 
     def _upgrade_runtime(self) -> None:
+        required_attrs = (
+            "_runtime_profile_name",
+            "_bio_sdr_cache",
+            "_bio_dendrite_cache",
+            "_bio_pc_cache",
+            "_native_active_cache",
+            "_native_single_values",
+        )
+        if getattr(self, "_runtime_upgraded", False) and all(hasattr(self, attr) for attr in required_attrs):
+            return
         defaults = LSLCoreConfig()
         for key, value in defaults.__dict__.items():
             if not hasattr(self.config, key):
@@ -107,6 +124,16 @@ class LSLCoreModel:
             self.native_core_stats = {}
         if not hasattr(self, "bio_native_stats"):
             self.bio_native_stats = {}
+        if not hasattr(self, "_bio_sdr_cache"):
+            self._bio_sdr_cache = {}
+        if not hasattr(self, "_bio_dendrite_cache"):
+            self._bio_dendrite_cache = {}
+        if not hasattr(self, "_bio_pc_cache"):
+            self._bio_pc_cache = {}
+        if not hasattr(self, "_native_active_cache"):
+            self._native_active_cache = {}
+        if not hasattr(self, "_native_single_values"):
+            self._native_single_values = np.ones(1, dtype=np.float32)
         for key, value in {
             "forward_calls": 0.0,
             "native_forward_calls": 0.0,
@@ -129,6 +156,8 @@ class LSLCoreModel:
             "dendrite_votes": 0.0,
         }.items():
             self.bio_native_stats.setdefault(key, value)
+        self._runtime_profile_name = self._runtime_profile_from_config(self.config)
+        self._runtime_upgraded = True
 
     @staticmethod
     def _runtime_profile_from_config(config: LSLCoreConfig) -> str:
@@ -138,11 +167,15 @@ class LSLCoreModel:
         return profile
 
     def runtime_profile(self) -> str:
-        self._upgrade_runtime()
-        return self._runtime_profile_from_config(self.config)
+        profile = getattr(self, "_runtime_profile_name", None)
+        if profile is None:
+            self._upgrade_runtime()
+            profile = self._runtime_profile_name
+        return str(profile)
 
     def set_runtime_profile(self, profile: str) -> None:
-        self.config.runtime_profile = str(profile).strip().lower().replace("-", "_")
+        self.config.runtime_profile = self._runtime_profile_from_config(LSLCoreConfig(runtime_profile=profile))
+        self._runtime_profile_name = self.config.runtime_profile
         runtime = self.runtime_profile()
         full_modules = runtime in {"full", "bio_native"}
         self.agent.use_pc_v2 = full_modules
@@ -165,10 +198,16 @@ class LSLCoreModel:
         self.tokenizer_built = True
         self._ensure_native_core()
 
-    def encode(self, text: str) -> List[int]:
+    def encode(self, text: str, max_tokens: Optional[int] = None) -> List[int]:
         if not self.tokenizer_built:
             self.build_tokenizer(text)
-        return [int(token) for token in self.agent.tokenizer.encode(text)]
+        try:
+            tokens = self.agent.tokenizer.encode(text, max_tokens=max_tokens)
+        except TypeError:
+            tokens = self.agent.tokenizer.encode(text)
+            if max_tokens is not None:
+                tokens = tokens[: int(max_tokens)]
+        return [int(token) for token in tokens]
 
     def decode(self, token_ids: Iterable[int]) -> str:
         return self.agent.tokenizer.decode([int(token) for token in token_ids])
@@ -230,27 +269,35 @@ class LSLCoreModel:
         if str(stats.get("mode", "")).startswith("native_"):
             self.native_core_stats["native_update_calls"] += 1.0
 
+    def _native_active_singleton(self, token_id: int) -> np.ndarray:
+        token = int(token_id) % max(1, int(self.vocab_size))
+        active = self._native_active_cache.get(token)
+        if active is None:
+            active = np.array([token], dtype=np.intp)
+            self._native_active_cache[token] = active
+        return active
+
     def _native_scores(self, token_id: int) -> Optional[np.ndarray]:
-        if not self._ensure_native_core() or self.native_transition is None:
+        if self.native_transition is None and not self._ensure_native_core():
             return None
         post, stats = self.native_transition.forward_active(
-            np.array([int(token_id) % self.vocab_size], dtype=np.intp),
-            np.ones(1, dtype=np.float32),
+            self._native_active_singleton(token_id),
+            self._native_single_values,
             return_stats=True,
         )
         self._record_native_forward(stats)
         return post
 
     def _native_observe_transition(self, source: int, target: int, lr_scale: float = 1.0) -> None:
-        if not self._ensure_native_core() or self.native_transition is None:
+        if self.native_transition is None and not self._ensure_native_core():
             return
         lr = max(0.0, float(self.config.native_lr) * float(lr_scale))
         if lr <= 0.0:
             return
         self.native_transition.target_update_from_active(
-            np.array([int(source) % self.vocab_size], dtype=np.intp),
+            self._native_active_singleton(source),
             int(target) % self.vocab_size,
-            np.ones(1, dtype=np.float32),
+            self._native_single_values,
             lr=lr,
             decay=float(self.config.native_decay),
             max_abs=12.0,
@@ -258,20 +305,37 @@ class LSLCoreModel:
         self._record_native_update(self.native_transition.last_update_ops)
 
     def _bio_sdr_bits(self, token: int) -> Tuple[int, ...]:
-        bits = self.agent.sdr_v2.encode(str(int(token)))
+        token = int(token)
+        bits = self._bio_sdr_cache.get(token)
+        if bits is None:
+            bits = self.agent.sdr_v2.encode(str(token))
+            self._bio_sdr_cache[token] = bits
         self.agent.sdr_observations += 1
         self.agent.sdr_active_total += len(bits)
         self.bio_native_stats["sdr_steps"] += 1.0
         return bits
 
     def _bio_dendrite_bits(self, token: int) -> Tuple[int, ...]:
-        return tuple(int(bit) % self.agent.dendrites.input_dim for bit in self.agent.sdr_v2.encode(str(int(token))))
+        token = int(token)
+        bits = self._bio_dendrite_cache.get(token)
+        if bits is None:
+            sdr_bits = self._bio_sdr_cache.get(token)
+            if sdr_bits is None:
+                sdr_bits = self.agent.sdr_v2.encode(str(token))
+                self._bio_sdr_cache[token] = sdr_bits
+            bits = tuple(sorted(int(bit) % self.agent.dendrites.input_dim for bit in sdr_bits))
+            self._bio_dendrite_cache[token] = bits
+        return bits
 
     def _bio_pc_observe(self, token: int, learn: bool) -> Dict[str, float]:
-        states = [
-            self.agent.pc_v2.state_for(int(token) + layer * 997, layer)
-            for layer in range(self.agent.pc_v2.layers)
-        ]
+        token = int(token)
+        states = self._bio_pc_cache.get(token)
+        if states is None:
+            states = tuple(
+                self.agent.pc_v2.state_for(token + layer * 997, layer)
+                for layer in range(self.agent.pc_v2.layers)
+            )
+            self._bio_pc_cache[token] = states
         stats = self.agent.pc_v2.observe(states, learn=learn)
         self.bio_native_stats["pc_steps"] += 1.0
         if stats.get("updates", 0.0) == 0.0:
@@ -312,7 +376,10 @@ class LSLCoreModel:
             )
             if written:
                 self.bio_native_stats["hippocampus_writes"] += 1.0
-            dendrite_bits = tuple(int(bit) % self.agent.dendrites.input_dim for bit in bits)
+            dendrite_bits = self._bio_dendrite_cache.get(int(token))
+            if dendrite_bits is None:
+                dendrite_bits = tuple(sorted(int(bit) % self.agent.dendrites.input_dim for bit in bits))
+                self._bio_dendrite_cache[int(token)] = dendrite_bits
             self.agent.dendrites.observe(dendrite_bits, output=int(token))
             self.bio_native_stats["dendrite_writes"] += 1.0
 
@@ -362,15 +429,15 @@ class LSLCoreModel:
         return best, value
 
     def _native_score_summary(self, token_id: int, target_id: int = -1) -> Optional[Dict[str, float]]:
-        if not self._ensure_native_core() or self.native_transition is None:
+        if self.native_transition is None and not self._ensure_native_core():
             return None
         try:
             stats = sparse_native.score_active(
                 self.native_transition.W_slow,
                 self.native_transition.W_live,
                 self.native_transition.fatigue,
-                np.array([int(token_id) % self.vocab_size], dtype=np.intp),
-                np.ones(1, dtype=np.float32),
+                self._native_active_singleton(token_id),
+                self._native_single_values,
                 int(target_id),
             )
         except RuntimeError:
@@ -423,9 +490,9 @@ class LSLCoreModel:
                 target = int(target)
                 if 0 <= target < vocab:
                     self.native_transition.target_update_from_active(
-                        np.array([source], dtype=np.intp),
+                        self._native_active_singleton(source),
                         target,
-                        np.ones(1, dtype=np.float32),
+                        self._native_single_values,
                         lr=float(count) / total,
                         decay=0.0,
                         max_abs=12.0,
@@ -528,12 +595,13 @@ class LSLCoreModel:
         for idx, text in enumerate(items):
             if self.runtime_profile() != "native_fast":
                 self.agent.world.observe_chunk(text, source=f"stream:{idx}")
-            tokens = self.encode(text)
             if max_tokens is not None:
                 remaining = int(max_tokens) - total_tokens
                 if remaining <= 0:
                     break
-                tokens = tokens[:remaining]
+                tokens = self.encode(text, max_tokens=remaining)
+            else:
+                tokens = self.encode(text)
             metrics = self.fit_tokens(tokens, reset=False)
             total_tokens += len(tokens)
             total_seconds += metrics["elapsed_seconds"]
@@ -636,9 +704,7 @@ class LSLCoreModel:
         }
 
     def evaluate_text(self, text: str, max_tokens: Optional[int] = None) -> Dict[str, float]:
-        tokens = self.encode(text)
-        if max_tokens is not None:
-            tokens = tokens[: int(max_tokens)]
+        tokens = self.encode(text, max_tokens=max_tokens)
         metrics = self.evaluate_tokens(tokens)
         unk_id = getattr(self.tokenizer, "word_to_id", getattr(self.tokenizer, "token_to_id", {})).get("<UNK>", 1)
         metrics["unk_rate"] = sum(int(token) == int(unk_id) for token in tokens) / max(1, len(tokens))

@@ -45,10 +45,17 @@ class SimpleWordTokenizer:
         tokens = re.findall(r"\w+|[^\w\s]", text, re.UNICODE)
         return tokens
 
-    def encode(self, text):
+    def encode(self, text, max_tokens=None):
         """Encode string text into a list of token IDs."""
-        tokens = self._tokenize_raw(text)
         unk_id = self.word_to_id.get("<UNK>", 1)
+        if max_tokens is not None:
+            ids = []
+            for match in re.finditer(r"\w+|[^\w\s]", text.lower(), re.UNICODE):
+                ids.append(self.word_to_id.get(match.group(0), unk_id))
+                if len(ids) >= int(max_tokens):
+                    return ids
+            return ids
+        tokens = self._tokenize_raw(text)
         return [self.word_to_id.get(tok, unk_id) for tok in tokens]
 
     def decode(self, token_ids):

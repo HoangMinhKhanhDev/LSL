@@ -86,7 +86,7 @@ class CorticalColumnSequenceMemory:
     def _context_key(self, token_id):
         return (int(token_id), tuple(sorted(self._prev_active_cells)))
 
-    def _get_column_winner(self, token_id, burst=False):
+    def _get_column_winner(self, token_id, burst=False, predicted_for_token=None):
         """Get active cells for a column.
 
         Args:
@@ -106,7 +106,8 @@ class CorticalColumnSequenceMemory:
             return set(self._context_winners[key])
         else:
             # Use predicted cells for this token
-            predicted_for_token = {cell for (tok, cell) in self.predicted_cells if tok == token_id}
+            if predicted_for_token is None:
+                predicted_for_token = {cell for (tok, cell) in self.predicted_cells if tok == token_id}
             if len(predicted_for_token) >= self.k:
                 # Use top-k predicted cells
                 cells = sorted(predicted_for_token)[:self.k]
@@ -153,11 +154,7 @@ class CorticalColumnSequenceMemory:
                 self.predicted_cells.add((token, cell))
 
         self.predicted_tokens.clear()
-        ctx_scores = self._context_prediction_scores()
-        if np.max(ctx_scores) > 0:
-            for tok in np.argsort(ctx_scores)[-3:]:
-                if ctx_scores[int(tok)] > 0:
-                    self.predicted_tokens.add(int(tok))
+        self.predicted_tokens.update(self._context_top_predictions(limit=3))
 
     def _learn_context_transition(self, token_id):
         if not self.recent_tokens:
@@ -182,6 +179,34 @@ class CorticalColumnSequenceMemory:
             for token, strength in self.context_transitions[key].items():
                 scores[int(token)] += weight * float(strength)
         return scores
+
+    def _context_top_predictions(self, limit=3):
+        scores = {}
+        max_len = min(self.max_context, len(self.recent_tokens))
+        for length in range(1, max_len + 1):
+            key = tuple(self.recent_tokens[-length:])
+            transitions = self.context_transitions.get(key)
+            if not transitions:
+                continue
+            weight = float(length * length)
+            for token, strength in transitions.items():
+                token = int(token)
+                scores[token] = scores.get(token, 0.0) + weight * float(strength)
+        if not scores:
+            return []
+        best = []
+        limit = max(1, int(limit))
+        for token, score in scores.items():
+            if score <= 0.0:
+                continue
+            item = (float(score), -int(token), int(token))
+            if len(best) < limit:
+                best.append(item)
+                continue
+            worst_index = min(range(len(best)), key=lambda idx: (best[idx][0], best[idx][1]))
+            if (item[0], item[1]) > (best[worst_index][0], best[worst_index][1]):
+                best[worst_index] = item
+        return [item[2] for item in sorted(best, key=lambda item: (-item[0], -item[1]))]
 
     def _learn_segment(self, prev_token, prev_cell, next_token, next_cell, strength=1.0):
         """Learn a temporal segment from previous cell to next cell.
@@ -222,7 +247,10 @@ class CorticalColumnSequenceMemory:
 
         if was_predicted:
             # Suppression: activate only predicted cells
-            self.active_cells = {(token_id, cell) for cell in self._get_column_winner(token_id, burst=False)}
+            self.active_cells = {
+                (token_id, cell)
+                for cell in self._get_column_winner(token_id, burst=False, predicted_for_token=predicted_for_token)
+            }
             self.suppression_count += 1
             burst = False
         else:

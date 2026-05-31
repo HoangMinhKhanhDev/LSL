@@ -19,6 +19,7 @@ class SimpleSubwordTokenizer:
         self.id_to_token: Dict[int, str] = {}
         self.merges: Dict[Tuple[str, str], str] = {}
         self.merge_order: List[Tuple[str, str]] = []
+        self._encode_cache: Dict[str, Tuple[int, ...]] = {}
 
     def _words(self, text: str) -> List[str]:
         return re.findall(r"\w+|[^\w\s]", text.lower(), re.UNICODE)
@@ -59,6 +60,7 @@ class SimpleSubwordTokenizer:
 
         self.merges.clear()
         self.merge_order.clear()
+        self._encode_cache.clear()
         max_merges = self.max_merges
         if max_merges is None:
             max_merges = max(0, self.vocab_size - len(self.special_tokens) - len(base_units))
@@ -104,12 +106,26 @@ class SimpleSubwordTokenizer:
             result = self._merge_units(result, pair, self.merges[pair])
         return result
 
-    def encode(self, text: str) -> List[int]:
+    def _encode_word(self, word: str, unk: int) -> Tuple[int, ...]:
+        cached = self._encode_cache.get(word)
+        if cached is not None:
+            return cached
+        units = self._apply_merges(self._initial_units(word))
+        encoded = tuple(self.token_to_id.get(unit, unk) for unit in units)
+        self._encode_cache[word] = encoded
+        return encoded
+
+    def encode(self, text: str, max_tokens: int = None) -> List[int]:
         unk = self.token_to_id.get("<UNK>", 1)
         ids: List[int] = []
-        for word in self._words(text):
-            units = self._apply_merges(self._initial_units(word))
-            ids.extend(self.token_to_id.get(unit, unk) for unit in units)
+        if max_tokens is None:
+            words = self._words(text)
+        else:
+            words = (match.group(0) for match in re.finditer(r"\w+|[^\w\s]", text.lower(), re.UNICODE))
+        for word in words:
+            ids.extend(self._encode_word(word, unk))
+            if max_tokens is not None and len(ids) >= int(max_tokens):
+                return ids[: int(max_tokens)]
         return ids
 
     def decode(self, token_ids: Iterable[int]) -> str:

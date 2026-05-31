@@ -34,6 +34,26 @@ def _feature_bits(feature: str, dim: int, count: int, seed: int = 0) -> Tuple[in
     return tuple(sorted(bits))
 
 
+def _tuple_overlap_sorted(left: Tuple[int, ...], right: Tuple[int, ...]) -> int:
+    i = 0
+    j = 0
+    overlap = 0
+    left_len = len(left)
+    right_len = len(right)
+    while i < left_len and j < right_len:
+        a = int(left[i])
+        b = int(right[j])
+        if a == b:
+            overlap += 1
+            i += 1
+            j += 1
+        elif a < b:
+            i += 1
+        else:
+            j += 1
+    return overlap
+
+
 class LocalPredictiveStack:
     """Layer-local predictor with exact local pre-state -> post-state tables."""
 
@@ -71,7 +91,7 @@ class LocalPredictiveStack:
             if prev is not None:
                 predicted = self._predict(layer, prev)
                 if predicted is not None:
-                    overlap = len(set(predicted) & set(current))
+                    overlap = _tuple_overlap_sorted(predicted, current)
                     error = 1.0 - overlap / max(1.0, float(self.k))
                 if learn and error > self.theta:
                     self.tables[layer][prev][tuple(current)] += 1.0
@@ -372,7 +392,7 @@ class DendriticSegment:
         return 1.0 / (1.0 + math.exp(-float(value)))
 
     def flat_drive(self, bits: Iterable[int]) -> float:
-        active = {int(bit) for bit in bits}
+        active = bits if isinstance(bits, set) else {int(bit) for bit in bits}
         return float(sum(weight for bit, weight in zip(self.active_bits, self.weights) if bit in active))
 
     def activation(self, bits: Iterable[int]) -> float:
@@ -420,6 +440,8 @@ class DendriticLayer:
         self.soma_threshold = float(soma_threshold)
         self.seed = int(seed)
         self.branches: List[DendriticSegment] = []
+        self._branch_index = {}
+        self._bit_to_branch_ids = defaultdict(list)
         self.segments = self.branches
         self.last_ops = 0
         self.last_active_branches = 0
@@ -449,6 +471,14 @@ class DendriticLayer:
         selected = tuple(sorted({int(bit) % self.input_dim for bit in bits}))
         if not selected:
             raise ValueError("Dendritic branch needs at least one active bit")
+        key = (int(output), selected)
+        if not hasattr(self, "_branch_index"):
+            self._branch_index = {
+                (int(branch.output), tuple(branch.active_bits)): branch
+                for branch in self.branches
+            }
+        if key in self._branch_index:
+            return self._branch_index[key]
         branch = DendriticSegment(
             selected,
             int(output),
@@ -458,10 +488,25 @@ class DendriticLayer:
             branch_id=len(self.branches),
         )
         self.branches.append(branch)
+        self._branch_index[key] = branch
+        self._bit_to_branch_ids.clear()
         return branch
 
+    def _ensure_bit_index(self) -> None:
+        if not hasattr(self, "_bit_to_branch_ids"):
+            self._bit_to_branch_ids = defaultdict(list)
+        if self._bit_to_branch_ids and len(self._bit_to_branch_ids) > 0:
+            return
+        for idx, branch in enumerate(self.branches):
+            branch.branch_id = idx
+            for bit in branch.active_bits:
+                self._bit_to_branch_ids[int(bit)].append(idx)
+
     def observe(self, bits: Iterable[int], output: int) -> None:
-        selected = tuple(sorted(int(b) % self.input_dim for b in bits))[: self.segment_size]
+        if isinstance(bits, tuple):
+            selected = bits[: self.segment_size]
+        else:
+            selected = tuple(sorted(int(b) % self.input_dim for b in bits))[: self.segment_size]
         if len(selected) < self.segment_size:
             return
         self.add_branch(selected, output=int(output), threshold=max(0.5, float(len(selected)) - 0.5))
@@ -489,9 +534,17 @@ class DendriticLayer:
         votes = Counter()
         self.last_ops = 0
         self.last_active_branches = 0
-        for branch in self.branches:
+        self._ensure_bit_index()
+        active = {int(bit) % self.input_dim for bit in bits}
+        candidate_ids = set()
+        for bit in active:
+            candidate_ids.update(self._bit_to_branch_ids.get(int(bit), ()))
+        for branch_id in candidate_ids:
+            if branch_id < 0 or branch_id >= len(self.branches):
+                continue
+            branch = self.branches[branch_id]
             self.last_ops += len(branch.active_bits)
-            activation = branch.activation(bits)
+            activation = branch.activation(active)
             if activation >= 0.5:
                 votes[branch.output] += branch.strength * activation
                 self.last_active_branches += 1
