@@ -9,8 +9,12 @@ from collections import Counter, defaultdict, deque
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
+import numpy as np
+
 from .agent import IntegratedLSLAgent
 from .cortical_column import CorticalColumnSequenceMemory
+from . import sparse_native
+from .sparse_native import NATIVE_AVAILABLE
 
 
 def _norm(value) -> str:
@@ -465,6 +469,15 @@ class DendriticLayer:
         self.last_updated_branches = 0
         self.branch_local_update_events = 0
         self.global_error_updates = 0
+        self.native_predict_calls = 0
+        self.native_predict_success = 0
+        self._native_pack_dirty = True
+        self._native_branch_bits = None
+        self._native_branch_lengths = None
+        self._native_branch_weights = None
+        self._native_branch_thresholds = None
+        self._native_branch_strengths = None
+        self._native_branch_outputs = None
         if int(branches_per_output) > 0:
             self.initialize_tree(branches_per_output=int(branches_per_output), branch_size=self.branch_size)
 
@@ -507,6 +520,7 @@ class DendriticLayer:
         self.branches.append(branch)
         self._branch_index[key] = branch
         self._bit_to_branch_ids.clear()
+        self._native_pack_dirty = True
         return branch
 
     def _ensure_bit_index(self) -> None:
@@ -528,6 +542,7 @@ class DendriticLayer:
             self._branch_index[key] = branch
             for bit in branch.active_bits:
                 self._bit_to_branch_ids[int(bit)].append(idx)
+        self._native_pack_dirty = True
 
     def prune_branches(self, max_branches: int) -> int:
         max_branches = int(max_branches)
@@ -548,6 +563,37 @@ class DendriticLayer:
         self.branches[:] = kept
         self._rebuild_indexes()
         return removed
+
+    def _ensure_native_pack(self) -> bool:
+        if not NATIVE_AVAILABLE or not self.branches:
+            return False
+        if not self._native_pack_dirty and self._native_branch_bits is not None:
+            return True
+        width = max(1, max(len(branch.active_bits) for branch in self.branches))
+        count = len(self.branches)
+        bits = np.full((count, width), -1, dtype=np.intp)
+        weights = np.zeros((count, width), dtype=np.float32)
+        lengths = np.zeros(count, dtype=np.intp)
+        thresholds = np.zeros(count, dtype=np.float32)
+        strengths = np.zeros(count, dtype=np.float32)
+        outputs = np.zeros(count, dtype=np.intp)
+        for idx, branch in enumerate(self.branches):
+            branch.branch_id = idx
+            length = len(branch.active_bits)
+            lengths[idx] = length
+            thresholds[idx] = float(branch.threshold)
+            strengths[idx] = float(branch.strength)
+            outputs[idx] = int(branch.output)
+            bits[idx, :length] = np.asarray(branch.active_bits, dtype=np.intp)
+            weights[idx, :length] = np.asarray(branch.weights, dtype=np.float32)
+        self._native_branch_bits = bits
+        self._native_branch_lengths = lengths
+        self._native_branch_weights = weights
+        self._native_branch_thresholds = thresholds
+        self._native_branch_strengths = strengths
+        self._native_branch_outputs = outputs
+        self._native_pack_dirty = False
+        return True
 
     def observe(self, bits: Iterable[int], output: int) -> None:
         if isinstance(bits, tuple):
@@ -578,11 +624,30 @@ class DendriticLayer:
         return activations
 
     def predict(self, bits: Iterable[int]) -> Optional[int]:
+        active = {int(bit) % self.input_dim for bit in bits}
+        if self._ensure_native_pack():
+            self.native_predict_calls += 1
+            try:
+                stats = sparse_native.dendrite_predict(
+                    self._native_branch_bits,
+                    self._native_branch_lengths,
+                    self._native_branch_weights,
+                    self._native_branch_thresholds,
+                    self._native_branch_strengths,
+                    self._native_branch_outputs,
+                    np.asarray(sorted(active), dtype=np.intp),
+                )
+                self.last_ops = int(stats.get("ops", 0))
+                self.last_active_branches = int(stats.get("active_branches", 0))
+                best = int(stats.get("best_output", -1))
+                self.native_predict_success += 1
+                return best if best >= 0 else None
+            except RuntimeError:
+                pass
         votes = Counter()
         self.last_ops = 0
         self.last_active_branches = 0
         self._ensure_bit_index()
-        active = {int(bit) % self.input_dim for bit in bits}
         candidate_ids = set()
         for bit in active:
             candidate_ids.update(self._bit_to_branch_ids.get(int(bit), ()))
@@ -623,6 +688,7 @@ class DendriticLayer:
                 if updates:
                     self.last_updated_branches += 1
                     self.branch_local_update_events += 1
+                    self._native_pack_dirty = True
                     update_ops += updates
         return update_ops
 
@@ -663,6 +729,10 @@ class DendriticLayer:
             "last_zero_update_branch_ratio": 1.0 - float(self.last_updated_branches) / float(branches),
             "branch_local_update_events": float(self.branch_local_update_events),
             "global_error_updates": float(self.global_error_updates),
+            "native_predict_available": float(NATIVE_AVAILABLE),
+            "native_predict_calls": float(self.native_predict_calls),
+            "native_predict_success": float(self.native_predict_success),
+            "native_predict_ratio": float(self.native_predict_success) / max(1.0, float(self.native_predict_calls)),
             "last_ops": float(self.last_ops),
             "dense_ops_proxy": float(self.dense_ops_proxy()),
             "compute_density_gain": float(self.dense_ops_proxy()) / max(1.0, float(self.last_ops)),

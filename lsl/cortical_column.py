@@ -15,6 +15,9 @@ This matches cortical column dynamics:
 """
 import numpy as np
 
+from . import sparse_native
+from .sparse_native import NATIVE_AVAILABLE
+
 
 class CorticalColumnSequenceMemory:
     """Cortical column sequence memory for temporal pattern learning.
@@ -62,6 +65,8 @@ class CorticalColumnSequenceMemory:
         self.suppression_count = 0
         self.total_steps = 0
         self.segment_count = 0
+        self.native_topk_calls = 0
+        self.native_topk_success = 0
 
     def reset_state(self):
         """Reset active cells and predictions without losing learned segments."""
@@ -331,6 +336,18 @@ class CorticalColumnSequenceMemory:
 
         return scores
 
+    def topk_prediction_indices(self, scores, top_k=3):
+        limit = max(1, int(top_k))
+        if NATIVE_AVAILABLE:
+            self.native_topk_calls += 1
+            try:
+                result = sparse_native.topk_float32(scores, limit)
+                self.native_topk_success += 1
+                return [int(idx) for idx in result.get("indices", [])]
+            except RuntimeError:
+                pass
+        return [int(idx) for idx in np.argsort(scores)[-limit:][::-1]]
+
     def generate(self, prefix_tokens, max_steps=20, temperature=1.0, top_k=3):
         """Generate text from a prefix using sequence memory.
 
@@ -362,7 +379,7 @@ class CorticalColumnSequenceMemory:
                 break
 
             # Get top-k predictions
-            top_indices = np.argsort(scores)[-top_k:][::-1]
+            top_indices = self.topk_prediction_indices(scores, top_k=top_k)
             top_scores = scores[top_indices]
 
             # Avoid repeating recent tokens (prevent loops)
@@ -408,4 +425,8 @@ class CorticalColumnSequenceMemory:
             "segment_count": self.segment_count,
             "active_cells": len(self.active_cells),
             "predicted_cells": len(self.predicted_cells),
+            "native_topk_available": float(NATIVE_AVAILABLE),
+            "native_topk_calls": float(self.native_topk_calls),
+            "native_topk_success": float(self.native_topk_success),
+            "native_topk_ratio": float(self.native_topk_success) / max(1.0, float(self.native_topk_calls)),
         }

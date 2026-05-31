@@ -22,6 +22,7 @@ import numpy as np
 from .bio import BioComputeAgent
 from .generation import GenerationController
 from . import sparse_native
+from .checkpoint import FRAME_MAGIC, append_checkpoint, load_checkpoint, load_legacy_json_checkpoint, migrate_checkpoint, save_checkpoint
 from .sparse_native import NATIVE_AVAILABLE
 from .synapse import LivingSynapseLayer
 
@@ -847,15 +848,20 @@ class LSLCoreModel:
         }
 
     def save(self, path: str) -> None:
+        lower = path.lower()
+        if lower.endswith((".lslb", ".lslbin", ".lslz", ".bin")):
+            self.save_binary(path)
+            return
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         payload = pickle.dumps(self, protocol=pickle.HIGHEST_PROTOCOL)
-        if path.lower().endswith(".json"):
+        if lower.endswith(".json"):
             wrapped = {
                 "format": "LSLCoreModelBase64Pickle",
-                "version": 1,
+                "version": 2,
                 "vocab_size": self.vocab_size,
                 "seen_tokens": self.seen_tokens,
                 "training_seconds": self.training_seconds,
+                "checkpoint_note": "legacy_json_wrapper; prefer .lslb for compressed binary checkpoints",
                 "payload_b64": base64.b64encode(payload).decode("ascii"),
             }
             with open(path, "w", encoding="utf-8") as f:
@@ -864,15 +870,47 @@ class LSLCoreModel:
         with open(path, "wb") as f:
             f.write(payload)
 
+    def save_binary(self, path: str, compression_level: int = 9) -> Dict[str, object]:
+        info = save_checkpoint(
+            self,
+            path,
+            compression_level=int(compression_level),
+            mode="compressed_sparse",
+            extra={
+                "vocab_size": int(self.vocab_size),
+                "seen_tokens": int(self.seen_tokens),
+                "runtime_profile": self.runtime_profile(),
+            },
+        )
+        self.last_checkpoint_info = dict(info)
+        return info
+
+    def save_compressed_sparse(self, path: str, compression_level: int = 9) -> Dict[str, object]:
+        return self.save_binary(path, compression_level=compression_level)
+
+    def save_incremental(self, path: str, parent: Optional[str] = None, compression_level: int = 9) -> Dict[str, object]:
+        info = append_checkpoint(
+            self,
+            path,
+            compression_level=int(compression_level),
+            parent=os.path.abspath(parent) if parent else None,
+            extra={
+                "vocab_size": int(self.vocab_size),
+                "seen_tokens": int(self.seen_tokens),
+                "runtime_profile": self.runtime_profile(),
+            },
+        )
+        self.last_checkpoint_info = dict(info)
+        return info
+
     @classmethod
     def load(cls, path: str) -> "LSLCoreModel":
-        if path.lower().endswith(".json"):
-            with open(path, "r", encoding="utf-8") as f:
-                wrapped = json.load(f)
-            if wrapped.get("format") != "LSLCoreModelBase64Pickle":
-                raise ValueError("Unsupported LSLCoreModel JSON checkpoint format")
-            raw = base64.b64decode(wrapped["payload_b64"])
-            model = pickle.loads(raw)
+        with open(path, "rb") as probe:
+            prefix = probe.read(len(FRAME_MAGIC))
+        if prefix == FRAME_MAGIC:
+            model = load_checkpoint(path)
+        elif path.lower().endswith(".json"):
+            model = load_legacy_json_checkpoint(path)
         else:
             with open(path, "rb") as f:
                 model = pickle.load(f)
@@ -882,3 +920,11 @@ class LSLCoreModel:
         if getattr(model, "tokenizer_built", False):
             model._ensure_native_core()
         return model
+
+    @classmethod
+    def migrate_checkpoint(cls, input_path: str, output_path: str, compression_level: int = 9) -> Dict[str, object]:
+        info = migrate_checkpoint(input_path, output_path, compression_level=int(compression_level))
+        model = cls.load(output_path)
+        if not isinstance(model, cls):
+            raise TypeError(f"Migration produced invalid checkpoint type: {type(model)!r}")
+        return info

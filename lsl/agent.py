@@ -56,8 +56,17 @@ class IntegratedLSLAgent:
             store_transition_index=False,
             seed=seed,
         )
-        if tokenizer == "subword":
+        tokenizer_name = str(tokenizer).strip().lower()
+        if tokenizer_name in {"subword", "bpe"}:
             self.tokenizer = SimpleSubwordTokenizer(vocab_size=vocab_size, max_merges=600)
+        elif tokenizer_name in {"subword_vi", "vietnamese", "vietnamese_subword"}:
+            self.tokenizer = SimpleSubwordTokenizer(
+                vocab_size=vocab_size,
+                max_merges=600,
+                vietnamese_normalization=True,
+                normalization_form="NFC",
+                byte_fallback=True,
+            )
         else:
             self.tokenizer = SimpleWordTokenizer(vocab_size=vocab_size)
         self.generator: Optional[GenerationController] = None

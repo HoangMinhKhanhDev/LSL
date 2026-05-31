@@ -28,6 +28,8 @@ from .ssm import LivingSSM
 from .model import LivingSynapseLM
 from .tokenizer import SimpleWordTokenizer
 from .subword_tokenizer import SimpleSubwordTokenizer
+from .text_normalization import looks_vietnamese, normalize_text, repair_utf8_mojibake
+from .checkpoint import append_checkpoint, load_checkpoint, migrate_checkpoint, save_checkpoint
 from .dataset_loader import DatasetConfig, DatasetLoader, DatasetSource, DatasetStats, DatasetTextSplits
 from .results import run_metadata, write_result
 from .sdr import (
@@ -91,6 +93,13 @@ __all__ = [
     "LivingSynapseLM",
     "SimpleWordTokenizer",
     "SimpleSubwordTokenizer",
+    "normalize_text",
+    "repair_utf8_mojibake",
+    "looks_vietnamese",
+    "save_checkpoint",
+    "append_checkpoint",
+    "load_checkpoint",
+    "migrate_checkpoint",
     "DatasetConfig",
     "DatasetLoader",
     "DatasetSource",

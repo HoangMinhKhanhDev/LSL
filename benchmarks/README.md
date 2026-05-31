@@ -151,6 +151,26 @@ python benchmarks/phase1/run_scaling_law.py --datasets vietnamese_small,dialogue
 python benchmarks/phase1/run_scaling_law.py --smoke
 ```
 
+Tokenizer quality/speed foundation:
+
+```bash
+python benchmarks/tokenization/benchmark_tokenizer.py --datasets tinystories,wikitext2,vietnamese_small,dialogue_small
+```
+
+This trains the improved Unicode-aware subword tokenizer, reports UNK rate by
+corpus, trains a Vietnamese-normalized tokenizer for `vietnamese_small`, writes
+durable encode/decode caches under `results/tokenizer_cache/`, and saves
+tokenizer JSON files under `results/tokenizers/`.
+
+Checkpoint formats:
+
+```python
+model.save("checkpoints/model.json")          # legacy JSON wrapper
+model.save_binary("checkpoints/model.lslb")   # compressed binary checkpoint
+model.save_incremental("checkpoints/model.lslj")
+LSLCoreModel.migrate_checkpoint("old.json", "new.lslb")
+```
+
 The runner stores metadata-rich JSON under `results/` by default, including
 config, seed, timestamp, git hash, platform, dataset paths, token budget,
 model-size proxy, train/eval metrics, optional same-token Transformer

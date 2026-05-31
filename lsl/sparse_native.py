@@ -127,3 +127,33 @@ def score_active(
         np.asarray(active_values, dtype=np.float32),
         int(target_index),
     )
+
+
+def dendrite_predict(
+    branch_bits: np.ndarray,
+    branch_lengths: np.ndarray,
+    branch_weights: np.ndarray,
+    branch_thresholds: np.ndarray,
+    branch_strengths: np.ndarray,
+    branch_outputs: np.ndarray,
+    active_bits: np.ndarray,
+) -> Dict[str, float]:
+    require_native()
+    if not hasattr(_sparse_native, "dendrite_predict"):
+        raise RuntimeError("lsl._sparse_native was built without dendrite_predict")
+    return _sparse_native.dendrite_predict(
+        np.asarray(branch_bits, dtype=np.intp),
+        np.asarray(branch_lengths, dtype=np.intp),
+        np.asarray(branch_weights, dtype=np.float32),
+        np.asarray(branch_thresholds, dtype=np.float32),
+        np.asarray(branch_strengths, dtype=np.float32),
+        np.asarray(branch_outputs, dtype=np.intp),
+        np.asarray(active_bits, dtype=np.intp),
+    )
+
+
+def topk_float32(scores: np.ndarray, k: int) -> Dict[str, object]:
+    require_native()
+    if not hasattr(_sparse_native, "topk_float32"):
+        raise RuntimeError("lsl._sparse_native was built without topk_float32")
+    return _sparse_native.topk_float32(np.asarray(scores, dtype=np.float32), int(k))
