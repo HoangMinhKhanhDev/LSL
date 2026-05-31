@@ -1,0 +1,20 @@
+Mô hình LSL học trực tuyến từ từng token và lưu lại các liên kết thưa trong bộ nhớ cục bộ.
+Một hệ thống học tốt cần phân biệt giữa ký ức ngắn hạn và tri thức dài hạn.
+Khi người dùng cung cấp một sự kiện mới, bộ nhớ hải mã ghi nhận ngay lập tức.
+Sau nhiều lần quan sát ổn định, tri thức được củng cố vào lớp chậm hơn.
+Các biểu diễn SDR dùng ít bit hoạt động để giảm nhiễu và tiết kiệm năng lượng.
+Trong tiếng Việt, dấu thanh và khoảng trắng cần được giữ chính xác khi tách token.
+Một trợ lý cá nhân phải nhớ sở thích của người dùng nhưng cũng phải tránh học dữ liệu rác.
+Nếu câu hỏi có bằng chứng trong bộ nhớ, câu trả lời nên trích xuất đúng thực thể liên quan.
+Hệ thống suy luận nhiều bước cần lưu biến trung gian trong một không gian làm việc tạm thời.
+Khi ngữ cảnh dài hơn, bộ nhớ thưa phải truy xuất bằng chỉ mục thay vì quét toàn bộ lịch sử.
+Một mô hình chạy trên CPU cần đo tốc độ, bộ nhớ, độ trễ và mức tiêu thụ năng lượng thực tế.
+Kết quả benchmark phải ghi lại cấu hình, seed, thời gian chạy và mã commit để tái lập.
+Nếu dữ liệu huấn luyện nhỏ, mô hình cần học nhanh nhưng không được quên kiến thức cũ.
+Cơ chế neuromodulation điều chỉnh tốc độ học dựa trên độ mới, độ bất ngờ và trạng thái ổn định.
+Cây dendrite phát hiện các mẫu đồng kích hoạt thưa và bỏ qua phần lớn tính toán không cần thiết.
+Một corpus tiếng Việt nhỏ giúp kiểm tra đường dẫn dữ liệu trước khi huấn luyện trên kho lớn.
+Trong thử nghiệm hội thoại, mô hình phải tránh lặp lại cùng một cụm từ quá nhiều lần.
+Khi có mâu thuẫn giữa hai sự kiện, hệ thống cần lưu nguồn bằng chứng để giải thích kết quả.
+Mục tiêu của giai đoạn nền tảng là biến mọi lần chạy thành dữ liệu đo được và so sánh công bằng.
+Các thử nghiệm lớn hơn sẽ dùng một triệu và mười triệu token để quan sát quy luật mở rộng.

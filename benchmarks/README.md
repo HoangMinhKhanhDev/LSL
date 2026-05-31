@@ -5,7 +5,8 @@ This folder contains the canonical benchmark implementations grouped by phase.
 Root-level `benchmark_*.py` files are thin compatibility wrappers so older
 commands still work, but the maintained code now lives here:
 
-- `phase1/`: SDR, semantic overlap, sparse compute, capacity, pattern completion
+- `phase1/`: SDR, semantic overlap, sparse compute, capacity, pattern completion,
+  and the Phase 1 dataset/training/scaling foundation runner
 - `phase2/`: predictive coding and related reasoning checks
 - `phase3/`: cortical column sequence-memory checks
 - `phase4/`: scale-oriented mechanism checks, semantic SDR at 100k vocab, and physical sparse-compute validation
@@ -141,6 +142,19 @@ Corpus checkpoint training:
 python benchmarks/train_lsl_corpus.py --dataset tinystories --max-tokens 1000000 --lsl-profile native_fast
 python lsl_chat.py --checkpoint checkpoints/lsl_tinystories.json --lsl-profile bio_native
 ```
+
+Phase 1 training foundation:
+
+```bash
+python benchmarks/phase1/run_scaling_law.py --datasets tinystories,wikitext2 --token-budgets 1000000,10000000 --seeds 42,43,44,45,46
+python benchmarks/phase1/run_scaling_law.py --datasets vietnamese_small,dialogue_small --token-budgets 10000 --repeat-small --compare-transformer
+python benchmarks/phase1/run_scaling_law.py --smoke
+```
+
+The runner stores metadata-rich JSON under `results/` by default, including
+config, seed, timestamp, git hash, platform, dataset paths, token budget,
+model-size proxy, train/eval metrics, optional same-token Transformer
+comparison, and optional memory-budget fit rows.
 
 If the default checkpoint is absent, `lsl_chat.py` bootstraps a small local
 TinyStories checkpoint before entering the chat loop.

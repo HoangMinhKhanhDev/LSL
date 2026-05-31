@@ -8,8 +8,6 @@ turn the comparison into a thresholded pass/fail gate.
 from __future__ import annotations
 
 import argparse
-import json
-import math
 import os
 import sys
 import time
@@ -21,15 +19,10 @@ import numpy as np
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from benchmarks.phase5.benchmark_baseline_competition import TrainableTinyTransformerCPU, softmax
-from lsl import GenerationController, LSLCoreModel
+from lsl import DatasetLoader, GenerationController, LSLCoreModel, write_result
 
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-TINYSTORIES_FULL = os.path.join(ROOT, "benchmarks", "data", "tinystories", "TinyStoriesV2-GPT4-valid.txt")
-TINYSTORIES_SUBSET = os.path.join(ROOT, "benchmarks", "phase4", "tinystories_subset.txt")
-WIKITEXT_TRAIN = os.path.join(ROOT, "benchmarks", "data", "wikitext-2-raw-v1", "wiki.train.raw.txt")
-WIKITEXT_TEST = os.path.join(ROOT, "benchmarks", "data", "wikitext-2-raw-v1", "wiki.test.raw.txt")
-
 
 def p50(values: List[float]) -> float:
     return float(np.percentile(values, 50)) if values else 0.0
@@ -40,30 +33,18 @@ def parse_lengths(raw: str) -> List[int]:
 
 
 def read_dataset(args: argparse.Namespace) -> Tuple[str, str, str]:
-    if args.dataset == "wikitext2":
-        if not os.path.exists(WIKITEXT_TRAIN) or not os.path.exists(WIKITEXT_TEST):
-            raise FileNotFoundError("WikiText-2 files are missing under benchmarks/data/wikitext-2-raw-v1")
-        with open(WIKITEXT_TRAIN, "r", encoding="utf-8") as f:
-            train = f.read(args.max_train_chars)
-        with open(WIKITEXT_TEST, "r", encoding="utf-8") as f:
-            test = f.read(args.max_eval_chars)
-        return train, test, WIKITEXT_TRAIN
-
-    if args.dataset == "custom":
-        if not args.corpus_path:
-            raise FileNotFoundError("--corpus-path is required for custom dataset")
-        with open(args.corpus_path, "r", encoding="utf-8") as f:
-            text = f.read(args.max_train_chars + args.max_eval_chars)
-        split = max(1, min(len(text) - 1, int(len(text) * args.train_fraction)))
-        return text[:split], text[split:], os.path.abspath(args.corpus_path)
-
-    path = TINYSTORIES_FULL if os.path.exists(TINYSTORIES_FULL) else TINYSTORIES_SUBSET
-    if not os.path.exists(path):
-        raise FileNotFoundError("TinyStories corpus is missing")
-    with open(path, "r", encoding="utf-8") as f:
-        text = f.read(args.max_train_chars + args.max_eval_chars)
-    split = max(1, min(len(text) - 1, int(len(text) * args.train_fraction)))
-    return text[:split], text[split:], path
+    loader = DatasetLoader(ROOT)
+    name = args.corpus_path if args.dataset == "custom" else args.dataset
+    if args.dataset == "custom" and not name:
+        raise FileNotFoundError("--corpus-path is required for custom dataset")
+    splits = loader.load_text_splits(
+        name,
+        train_fraction=args.train_fraction,
+        max_train_chars=args.max_train_chars,
+        max_eval_chars=args.max_eval_chars,
+        seed=args.seed,
+    )
+    return splits.train, splits.validation or splits.test, splits.train_path
 
 
 def transformer_eval(
@@ -238,8 +219,8 @@ def run(args: argparse.Namespace) -> Dict[str, object]:
         runtime_profile=args.lsl_profile,
     )
     lsl.build_tokenizer(train_text[: args.tokenizer_train_chars])
-    train_tokens = lsl.encode(train_text)[: args.max_train_tokens]
-    eval_tokens = lsl.encode(eval_text)[: args.max_eval_tokens]
+    train_tokens = lsl.encode(train_text, max_tokens=args.max_train_tokens)
+    eval_tokens = lsl.encode(eval_text, max_tokens=args.max_eval_tokens)
     if len(train_tokens) < args.context + 4 or len(eval_tokens) < args.context + 4:
         raise ValueError("Not enough tokens for the requested context/eval window")
 
@@ -375,7 +356,11 @@ def run(args: argparse.Namespace) -> Dict[str, object]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dataset", choices=["tinystories", "wikitext2", "custom"], default="tinystories")
+    parser.add_argument(
+        "--dataset",
+        choices=["tinystories", "wikitext2", "vietnamese_small", "dialogue_small", "custom"],
+        default="tinystories",
+    )
     parser.add_argument("--corpus-path", type=str, default=None)
     parser.add_argument("--train-fraction", type=float, default=0.70)
     parser.add_argument("--max-train-chars", type=int, default=120000)
@@ -404,6 +389,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--loop-rate-target", type=float, default=0.03)
     parser.add_argument("--fact-recall-target", type=float, default=0.95)
     parser.add_argument("--json-output", type=str, default=None)
+    parser.add_argument("--results-root", type=str, default="results")
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
 
@@ -452,10 +438,16 @@ def main() -> int:
     print(f"Prompt: {metrics['generation']['prompt'][:160]}")
     print(f"LSL:    {metrics['generation']['lsl_text'][:260]}")
     print(f"TF:     {metrics['generation']['transformer_text'][:260]}")
-    if args.json_output:
-        os.makedirs(os.path.dirname(args.json_output) or ".", exist_ok=True)
-        with open(args.json_output, "w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2)
+    output = write_result(
+        result,
+        benchmark="lsl_core_vs_transformer",
+        dataset=args.dataset,
+        seed=args.seed,
+        config=vars(args),
+        output_path=args.json_output,
+        results_root=args.results_root,
+    )
+    print(f"Result JSON:              {output}")
     return 0 if result["success"] else 1
 
 

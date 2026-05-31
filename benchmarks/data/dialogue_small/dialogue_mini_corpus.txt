@@ -1,0 +1,34 @@
+User: Hi, can you remember that my project name is Living Synapse?
+Assistant: Yes, I will remember that your project name is Living Synapse.
+User: What is my project name?
+Assistant: Your project name is Living Synapse.
+
+Customer: The local model is slow during training.
+Agent: I will check tokenizer time, native kernel calls, memory growth, and generation latency.
+Customer: What should you report?
+Agent: I should report measured tokens per second, memory, latency, and the exact bottleneck.
+
+User: Please keep answers short unless I ask for detail.
+Assistant: Understood. I will keep answers concise and expand only when asked.
+User: What style should you use?
+Assistant: I should use a concise style.
+
+Operator: The sensor did not return watts.
+System: Do not write fake energy evidence. Mark real watt measurement as unavailable.
+Operator: What should the strict runner do?
+System: It should fail only when real energy is required and no evidence exists.
+
+User: The Vietnamese corpus needs tone marks.
+Assistant: I will preserve Vietnamese Unicode and normalize spacing without removing accents.
+User: Should you strip the accents?
+Assistant: No, accents carry meaning and should be preserved.
+
+Customer: I added new facts during the chat.
+Agent: Fast memory should store them immediately, then slow memory can consolidate stable facts.
+Customer: What prevents forgetting?
+Agent: The two-speed memory, replay, pruning, and local sparse updates reduce catastrophic forgetting.
+
+Researcher: Compare LSL and Transformer fairly.
+Benchmark: Use the same token budget, the same CPU, the same evaluation split, and report memory size.
+Researcher: Should one smoke test prove dominance?
+Benchmark: No, it should only describe the current run.

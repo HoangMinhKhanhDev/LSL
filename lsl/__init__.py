@@ -28,6 +28,8 @@ from .ssm import LivingSSM
 from .model import LivingSynapseLM
 from .tokenizer import SimpleWordTokenizer
 from .subword_tokenizer import SimpleSubwordTokenizer
+from .dataset_loader import DatasetConfig, DatasetLoader, DatasetSource, DatasetStats, DatasetTextSplits
+from .results import run_metadata, write_result
 from .sdr import (
     SDREncoder,
     hamming_overlap,
@@ -89,6 +91,13 @@ __all__ = [
     "LivingSynapseLM",
     "SimpleWordTokenizer",
     "SimpleSubwordTokenizer",
+    "DatasetConfig",
+    "DatasetLoader",
+    "DatasetSource",
+    "DatasetStats",
+    "DatasetTextSplits",
+    "run_metadata",
+    "write_result",
     "SDREncoder",
     "hamming_overlap",
     "pairwise_overlap_matrix",
