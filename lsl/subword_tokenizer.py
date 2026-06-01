@@ -15,7 +15,7 @@ import hashlib
 import json
 import os
 import re
-from collections import Counter, defaultdict
+from collections import Counter, OrderedDict, defaultdict
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -30,6 +30,7 @@ class SimpleSubwordTokenizer:
         max_merges: Optional[int] = None,
         min_pair_count: int = 2,
         normalize_unicode: bool = True,
+        compatibility_normalization: bool = False,
         vietnamese_normalization: bool = False,
         normalization_form: str = "NFC",
         byte_fallback: bool = True,
@@ -41,6 +42,7 @@ class SimpleSubwordTokenizer:
         self.max_merges = max_merges
         self.min_pair_count = int(min_pair_count)
         self.normalize_unicode = bool(normalize_unicode)
+        self.compatibility_normalization = bool(compatibility_normalization)
         self.vietnamese_normalization = bool(vietnamese_normalization)
         self.normalization_form = str(normalization_form or "NFC")
         self.byte_fallback = bool(byte_fallback)
@@ -52,21 +54,84 @@ class SimpleSubwordTokenizer:
         self.id_to_token: Dict[int, str] = {}
         self.merges: Dict[Tuple[str, str], str] = {}
         self.merge_order: List[Tuple[str, str]] = []
-        self._word_cache: Dict[str, Tuple[int, ...]] = {}
-        self._encode_text_cache: Dict[str, Tuple[int, ...]] = {}
-        self._decode_cache: Dict[str, str] = {}
+        self._word_cache: OrderedDict[str, Tuple[int, ...]] = OrderedDict()
+        self._encode_text_cache: OrderedDict[str, Tuple[int, ...]] = OrderedDict()
+        self._decode_cache: OrderedDict[str, str] = OrderedDict()
         self._cache_hits = 0
         self._cache_misses = 0
+        self._ensure_backward_compatibility()
+
+    def _ensure_backward_compatibility(self) -> None:
+        if not hasattr(self, "requested_vocab_size"):
+            self.requested_vocab_size = int(getattr(self, "vocab_size", 8000))
+        if not hasattr(self, "vocab_size"):
+            self.vocab_size = int(getattr(self, "requested_vocab_size", 8000))
+        if not hasattr(self, "max_merges"):
+            self.max_merges = None
+        if not hasattr(self, "min_pair_count"):
+            self.min_pair_count = 2
+        if not hasattr(self, "normalize_unicode"):
+            self.normalize_unicode = True
+        if not hasattr(self, "compatibility_normalization"):
+            self.compatibility_normalization = False
+        if not hasattr(self, "vietnamese_normalization"):
+            self.vietnamese_normalization = False
+        if not hasattr(self, "normalization_form"):
+            self.normalization_form = "NFC"
+        if not hasattr(self, "byte_fallback"):
+            self.byte_fallback = True
+        if not hasattr(self, "cache_dir"):
+            self.cache_dir = None
+        if not hasattr(self, "cache_capacity"):
+            self.cache_capacity = 50000
+        if not hasattr(self, "special_tokens"):
+            self.special_tokens = ["<PAD>", "<UNK>"]
+        if not hasattr(self, "required_tokens"):
+            self.required_tokens = [" ", "</w>"]
+        if not hasattr(self, "token_to_id"):
+            self.token_to_id = {}
+        if not hasattr(self, "id_to_token"):
+            self.id_to_token = {}
+        if not hasattr(self, "merges"):
+            self.merges = {}
+        if not hasattr(self, "merge_order"):
+            self.merge_order = []
+        if not hasattr(self, "_word_cache"):
+            self._word_cache = OrderedDict()
+        if not hasattr(self, "_encode_text_cache"):
+            self._encode_text_cache = OrderedDict()
+        if not hasattr(self, "_decode_cache"):
+            self._decode_cache = OrderedDict()
+        if not hasattr(self, "_cache_hits"):
+            self._cache_hits = 0
+        if not hasattr(self, "_cache_misses"):
+            self._cache_misses = 0
 
     def _normalize_text(self, text: str, *, lowercase: bool = False) -> str:
         return normalize_text(
             text,
-            normalize_unicode=self.normalize_unicode,
-            normalization_form=self.normalization_form,
-            vietnamese_normalization=self.vietnamese_normalization,
+            normalize_unicode=bool(getattr(self, "normalize_unicode", True)),
+            compatibility_normalization=bool(getattr(self, "compatibility_normalization", False)),
+            normalization_form=str(getattr(self, "normalization_form", "NFC")),
+            vietnamese_normalization=bool(getattr(self, "vietnamese_normalization", False)),
             repair_mojibake=True,
             lowercase=lowercase,
         )
+
+    def _cache_get(self, cache, key):
+        value = cache.get(key)
+        if value is not None:
+            cache.move_to_end(key)
+        return value
+
+    def _cache_set(self, cache, key, value) -> None:
+        if self.cache_capacity <= 0:
+            return
+        if key in cache:
+            cache.move_to_end(key)
+        cache[key] = value
+        while len(cache) > self.cache_capacity:
+            cache.popitem(last=False)
 
     def _words(self, text: str) -> List[str]:
         normalized = self._normalize_text(text, lowercase=False)
@@ -185,13 +250,18 @@ class SimpleSubwordTokenizer:
         if not self.byte_fallback:
             return (int(unk),)
         raw = str(unit).replace("</w>", "")
-        ids = [self.token_to_id[self.byte_token(byte)] for byte in raw.encode("utf-8")]
+        ids = []
+        for byte in raw.encode("utf-8"):
+            token_id = self.token_to_id.get(self.byte_token(byte))
+            if token_id is None:
+                return (int(unk),)
+            ids.append(int(token_id))
         if str(unit).endswith("</w>") and "</w>" in self.token_to_id:
             ids.append(self.token_to_id["</w>"])
         return tuple(ids) if ids else (int(unk),)
 
     def _encode_word(self, word: str, unk: int) -> Tuple[int, ...]:
-        cached = self._word_cache.get(word)
+        cached = self._cache_get(self._word_cache, word)
         if cached is not None:
             return cached
         ids: List[int] = []
@@ -202,8 +272,7 @@ class SimpleSubwordTokenizer:
             else:
                 ids.append(int(token_id))
         encoded = tuple(ids)
-        if len(self._word_cache) < self.cache_capacity:
-            self._word_cache[word] = encoded
+        self._cache_set(self._word_cache, word, encoded)
         return encoded
 
     def _encode_cache_key(self, normalized: str, max_tokens: Optional[int]) -> str:
@@ -216,7 +285,7 @@ class SimpleSubwordTokenizer:
     def encode(self, text: str, max_tokens: Optional[int] = None) -> List[int]:
         normalized = self._normalize_text(text, lowercase=True)
         key = self._encode_cache_key(normalized, max_tokens)
-        cached = self._encode_text_cache.get(key)
+        cached = self._cache_get(self._encode_text_cache, key)
         if cached is not None:
             self._cache_hits += 1
             return list(cached)
@@ -232,8 +301,7 @@ class SimpleSubwordTokenizer:
             if max_tokens is not None and len(ids) >= int(max_tokens):
                 ids = ids[: int(max_tokens)]
                 break
-        if len(self._encode_text_cache) < self.cache_capacity:
-            self._encode_text_cache[key] = tuple(ids)
+        self._cache_set(self._encode_text_cache, key, tuple(ids))
         return ids
 
     def _decode_cache_key(self, token_ids: Iterable[int]) -> str:
@@ -245,7 +313,7 @@ class SimpleSubwordTokenizer:
     def decode(self, token_ids: Iterable[int]) -> str:
         ids = tuple(int(idx) for idx in token_ids)
         key = self._decode_cache_key(ids)
-        cached = self._decode_cache.get(key)
+        cached = self._cache_get(self._decode_cache, key)
         if cached is not None:
             self._cache_hits += 1
             return cached
@@ -276,8 +344,7 @@ class SimpleSubwordTokenizer:
         text = re.sub(r"\s+([.,!?;:)\]])", r"\1", text)
         text = re.sub(r"([(])\s+", r"\1", text)
         out = text.strip()
-        if len(self._decode_cache) < self.cache_capacity:
-            self._decode_cache[key] = out
+        self._cache_set(self._decode_cache, key, out)
         return out
 
     def unk_rate(self, token_ids: Iterable[int]) -> float:
@@ -296,6 +363,7 @@ class SimpleSubwordTokenizer:
         hits = float(self._cache_hits)
         misses = float(self._cache_misses)
         return {
+            "cache_capacity": float(self.cache_capacity),
             "encode_entries": float(len(self._encode_text_cache)),
             "word_entries": float(len(self._word_cache)),
             "decode_entries": float(len(self._decode_cache)),
@@ -306,10 +374,11 @@ class SimpleSubwordTokenizer:
 
     def fingerprint(self) -> str:
         payload = {
-            "version": 2,
+            "version": 3,
             "vocab": self.token_to_id,
             "merges": self.merge_order,
             "normalize_unicode": self.normalize_unicode,
+            "compatibility_normalization": self.compatibility_normalization,
             "vietnamese_normalization": self.vietnamese_normalization,
             "normalization_form": self.normalization_form,
             "byte_fallback": self.byte_fallback,
@@ -334,8 +403,9 @@ class SimpleSubwordTokenizer:
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "format": "LSLSubwordTokenizerCache",
-            "version": 1,
+            "version": 3,
             "fingerprint": self.fingerprint(),
+            "word": {key: list(value) for key, value in list(self._word_cache.items())[: self.cache_capacity]},
             "encode": {key: list(value) for key, value in list(self._encode_text_cache.items())[: self.cache_capacity]},
             "decode": dict(list(self._decode_cache.items())[: self.cache_capacity]),
         }
@@ -354,22 +424,32 @@ class SimpleSubwordTokenizer:
             return False
         if payload.get("format") != "LSLSubwordTokenizerCache" or payload.get("fingerprint") != self.fingerprint():
             return False
-        self._encode_text_cache = {
-            str(key): tuple(int(x) for x in value)
+        self._word_cache = OrderedDict(
+            (str(key), tuple(int(x) for x in value))
+            for key, value in dict(payload.get("word", {})).items()
+        )
+        self._encode_text_cache = OrderedDict(
+            (str(key), tuple(int(x) for x in value))
             for key, value in dict(payload.get("encode", {})).items()
-        }
-        self._decode_cache = {str(key): str(value) for key, value in dict(payload.get("decode", {})).items()}
+        )
+        self._decode_cache = OrderedDict((str(key), str(value)) for key, value in dict(payload.get("decode", {})).items())
+        self._word_cache = OrderedDict(list(self._word_cache.items())[-self.cache_capacity :]) if self.cache_capacity > 0 else OrderedDict()
+        self._encode_text_cache = (
+            OrderedDict(list(self._encode_text_cache.items())[-self.cache_capacity :]) if self.cache_capacity > 0 else OrderedDict()
+        )
+        self._decode_cache = OrderedDict(list(self._decode_cache.items())[-self.cache_capacity :]) if self.cache_capacity > 0 else OrderedDict()
         return True
 
     def to_dict(self) -> Dict[str, object]:
         return {
             "format": "LSLSimpleSubwordTokenizer",
-            "version": 2,
+            "version": 3,
             "requested_vocab_size": int(self.requested_vocab_size),
             "vocab_size": int(self.vocab_size),
             "max_merges": self.max_merges,
             "min_pair_count": int(self.min_pair_count),
             "normalize_unicode": bool(self.normalize_unicode),
+            "compatibility_normalization": bool(self.compatibility_normalization),
             "vietnamese_normalization": bool(self.vietnamese_normalization),
             "normalization_form": self.normalization_form,
             "byte_fallback": bool(self.byte_fallback),
@@ -378,6 +458,13 @@ class SimpleSubwordTokenizer:
             "token_to_id": dict(self.token_to_id),
             "merge_order": [list(pair) for pair in self.merge_order],
         }
+
+    def __getstate__(self) -> Dict[str, object]:
+        return dict(self.__dict__)
+
+    def __setstate__(self, state) -> None:
+        self.__dict__.update(dict(state or {}))
+        self._ensure_backward_compatibility()
 
     @classmethod
     def from_dict(cls, payload: Dict[str, object]) -> "SimpleSubwordTokenizer":
@@ -388,6 +475,7 @@ class SimpleSubwordTokenizer:
             max_merges=payload.get("max_merges"),
             min_pair_count=int(payload.get("min_pair_count", 2)),
             normalize_unicode=bool(payload.get("normalize_unicode", True)),
+            compatibility_normalization=bool(payload.get("compatibility_normalization", False)),
             vietnamese_normalization=bool(payload.get("vietnamese_normalization", False)),
             normalization_form=str(payload.get("normalization_form", "NFC")),
             byte_fallback=bool(payload.get("byte_fallback", True)),

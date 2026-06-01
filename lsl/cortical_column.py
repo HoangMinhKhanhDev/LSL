@@ -59,6 +59,10 @@ class CorticalColumnSequenceMemory:
         self.max_context = 4
         self.recent_tokens = []
         self.context_transitions = {}
+        self.last_prediction_confidence = 0.0
+        self.last_pruned_segments = 0
+        self.last_pruned_context_keys = 0
+        self.last_pruned_targets = 0
 
         # Metrics
         self.burst_count = 0
@@ -67,6 +71,66 @@ class CorticalColumnSequenceMemory:
         self.segment_count = 0
         self.native_topk_calls = 0
         self.native_topk_success = 0
+        self._ensure_backward_compatibility()
+
+    def _ensure_backward_compatibility(self) -> None:
+        if not hasattr(self, "vocab_size"):
+            self.vocab_size = 0
+        if not hasattr(self, "cells_per_column"):
+            self.cells_per_column = 100
+        if not hasattr(self, "sparsity"):
+            self.sparsity = 0.02
+        if not hasattr(self, "rng"):
+            self.rng = np.random.default_rng(42)
+        if not hasattr(self, "k"):
+            self.k = max(1, int(self.cells_per_column * self.sparsity))
+        if not hasattr(self, "column_active"):
+            self.column_active = np.zeros((self.vocab_size, self.cells_per_column), dtype=np.float32)
+        if not hasattr(self, "temporal_segments"):
+            self.temporal_segments = {}
+        if not hasattr(self, "predicted_cells"):
+            self.predicted_cells = set()
+        if not hasattr(self, "predicted_tokens"):
+            self.predicted_tokens = set()
+        if not hasattr(self, "active_cells"):
+            self.active_cells = set()
+        if not hasattr(self, "_prev_active_cells"):
+            self._prev_active_cells = set()
+        if not hasattr(self, "_context_winners"):
+            self._context_winners = {}
+        if not hasattr(self, "max_context"):
+            self.max_context = 4
+        if not hasattr(self, "recent_tokens"):
+            self.recent_tokens = []
+        if not hasattr(self, "context_transitions"):
+            self.context_transitions = {}
+        if not hasattr(self, "last_prediction_confidence"):
+            self.last_prediction_confidence = 0.0
+        if not hasattr(self, "last_pruned_segments"):
+            self.last_pruned_segments = 0
+        if not hasattr(self, "last_pruned_context_keys"):
+            self.last_pruned_context_keys = 0
+        if not hasattr(self, "last_pruned_targets"):
+            self.last_pruned_targets = 0
+        if not hasattr(self, "burst_count"):
+            self.burst_count = 0
+        if not hasattr(self, "suppression_count"):
+            self.suppression_count = 0
+        if not hasattr(self, "total_steps"):
+            self.total_steps = 0
+        if not hasattr(self, "segment_count"):
+            self.segment_count = 0
+        if not hasattr(self, "native_topk_calls"):
+            self.native_topk_calls = 0
+        if not hasattr(self, "native_topk_success"):
+            self.native_topk_success = 0
+
+    def __getstate__(self):
+        return dict(self.__dict__)
+
+    def __setstate__(self, state) -> None:
+        self.__dict__.update(dict(state or {}))
+        self._ensure_backward_compatibility()
 
     def reset_state(self):
         """Reset active cells and predictions without losing learned segments."""
@@ -160,6 +224,9 @@ class CorticalColumnSequenceMemory:
 
         self.predicted_tokens.clear()
         self.predicted_tokens.update(self._context_top_predictions(limit=3))
+        scores = self.predict_next_token_scores()
+        total = float(scores.sum())
+        self.last_prediction_confidence = float(scores.max() / total) if total > 0.0 else 0.0
 
     def _learn_context_transition(self, token_id):
         if not self.recent_tokens:
@@ -236,19 +303,25 @@ class CorticalColumnSequenceMemory:
 
     def prune_memory(self, max_segments=None, max_context_keys=None, max_targets_per_context=None):
         removed = 0
+        removed_targets = 0
+        removed_context_keys = 0
+        removed_segments = 0
         if max_targets_per_context is not None:
             limit = max(1, int(max_targets_per_context))
             for key, targets in list(self.context_transitions.items()):
                 if len(targets) <= limit:
                     continue
                 ranked = sorted(targets.items(), key=lambda item: (-float(item[1]), int(item[0])))[:limit]
-                removed += len(targets) - len(ranked)
+                removed_now = len(targets) - len(ranked)
+                removed += removed_now
+                removed_targets += removed_now
                 self.context_transitions[key] = dict(ranked)
         if max_context_keys is not None:
             limit = max(1, int(max_context_keys))
             while len(self.context_transitions) > limit:
                 self.context_transitions.pop(next(iter(self.context_transitions)))
                 removed += 1
+                removed_context_keys += 1
         if max_segments is not None:
             limit = max(1, int(max_segments))
             if len(self.temporal_segments) > limit:
@@ -257,9 +330,14 @@ class CorticalColumnSequenceMemory:
                     key=lambda item: sum(float(v) for v in item[1].values()),
                     reverse=True,
                 )[:limit]
-                removed += len(self.temporal_segments) - len(ranked_segments)
+                removed_now = len(self.temporal_segments) - len(ranked_segments)
+                removed += removed_now
+                removed_segments += removed_now
                 self.temporal_segments = dict(ranked_segments)
                 self.segment_count = len(self.temporal_segments)
+        self.last_pruned_targets = removed_targets
+        self.last_pruned_context_keys = removed_context_keys
+        self.last_pruned_segments = removed_segments
         return removed
 
     def forward(self, token_id, learn=True):
@@ -429,4 +507,8 @@ class CorticalColumnSequenceMemory:
             "native_topk_calls": float(self.native_topk_calls),
             "native_topk_success": float(self.native_topk_success),
             "native_topk_ratio": float(self.native_topk_success) / max(1.0, float(self.native_topk_calls)),
+            "prediction_confidence": float(self.last_prediction_confidence),
+            "last_pruned_segments": float(self.last_pruned_segments),
+            "last_pruned_context_keys": float(self.last_pruned_context_keys),
+            "last_pruned_targets": float(self.last_pruned_targets),
         }

@@ -4,6 +4,21 @@ import tempfile
 import numpy as np
 
 from lsl import CorticalColumnSequenceMemory, DendriticLayer, LSLCoreModel, NATIVE_AVAILABLE, SimpleSubwordTokenizer
+from lsl.text_normalization import looks_vietnamese, normalize_text, repair_utf8_mojibake
+
+
+def test_text_normalization_and_vietnamese_detection():
+    mojibake = "Ti\u1ebfng Vi\u1ec7t".encode("utf-8").decode("latin1")
+    assert repair_utf8_mojibake(mojibake) == "Tiếng Việt"
+    normalized = normalize_text(
+        "\ufeff" + mojibake + "\u200b  \r\n",
+        compatibility_normalization=True,
+        vietnamese_normalization=True,
+    )
+    assert "\ufeff" not in normalized
+    assert "\u200b" not in normalized
+    assert looks_vietnamese("Hôm nay trời đẹp.")
+    assert looks_vietnamese(normalized)
 
 
 def test_subword_tokenizer_byte_fallback_cache_and_vietnamese():
@@ -14,20 +29,60 @@ def test_subword_tokenizer_byte_fallback_cache_and_vietnamese():
             byte_fallback=True,
             cache_dir=raw,
         )
-        tok.build_vocab("Mô hình LSL học tiếng Việt. Bộ nhớ sparse giữ ngữ cảnh.")
-        ids = tok.encode("Điện toán LSL giữ dấu tiếng Việt 🚀", max_tokens=256)
+        tok.build_vocab("M\u00f4 h\u00ecnh LSL h\u1ecdc ti\u1ebfng Vi\u1ec7t. B\u1ed9 nh\u1edb sparse gi\u1eef ng\u1eef c\u1ea3nh.")
+        ids = tok.encode("\u0110i\u1ec7n to\u00e1n LSL gi\u1eef d\u1ea5u ti\u1ebfng Vi\u1ec7t \U0001f680", max_tokens=256)
         assert ids
         assert tok.unk_rate(ids) == 0.0
         decoded = tok.decode(ids)
         assert "lsl" in decoded
         assert tok.save_cache() is not None
-        tok.encode("Điện toán LSL giữ dấu tiếng Việt 🚀", max_tokens=256)
+        tok.encode("\u0110i\u1ec7n to\u00e1n LSL gi\u1eef d\u1ea5u ti\u1ebfng Vi\u1ec7t \U0001f680", max_tokens=256)
         assert tok.cache_stats()["hit_rate"] > 0.0
         saved = os.path.join(raw, "vi_tokenizer.json")
         tok.save(saved)
         loaded = SimpleSubwordTokenizer.load(saved)
-        assert loaded.encode("Điện toán LSL", max_tokens=64)
-        assert loaded.unk_rate(loaded.encode("Ký tự mới 🚀", max_tokens=64)) == 0.0
+        assert loaded.encode("\u0110i\u1ec7n to\u00e1n LSL", max_tokens=64)
+        assert loaded.unk_rate(loaded.encode("K\u00fd t\u1ef1 m\u1edbi \U0001f680", max_tokens=64)) == 0.0
+
+
+def test_subword_tokenizer_lru_cache_and_persistent_reload():
+    with tempfile.TemporaryDirectory() as raw:
+        tok = SimpleSubwordTokenizer(
+            vocab_size=128,
+            compatibility_normalization=True,
+            vietnamese_normalization=True,
+            byte_fallback=True,
+            cache_dir=raw,
+            cache_capacity=2,
+        )
+        tok.build_vocab("H\u00f4m nay tr\u1eddi \u0111\u1eb9p. LSL h\u1ecdc nhanh v\u00e0 nh\u1edb b\u1ec7n.")
+        first = "H\u00f4m nay LSL h\u1ecdc nhanh."
+        second = "B\u1ed9 nh\u1edb c\u00f3 d\u1ea5u ti\u1ebfng Vi\u1ec7t."
+        third = "Emoji \U0001f680 v\u00e0 k\u00fd t\u1ef1 m\u1edbi."
+        ids_first = tok.encode(first, max_tokens=64)
+        tok.encode(second, max_tokens=64)
+        tok.encode(first, max_tokens=64)
+        tok.encode(third, max_tokens=64)
+        assert len(tok._encode_text_cache) == 2
+        first_key = tok._encode_cache_key(tok._normalize_text(first, lowercase=True), 64)
+        second_key = tok._encode_cache_key(tok._normalize_text(second, lowercase=True), 64)
+        third_key = tok._encode_cache_key(tok._normalize_text(third, lowercase=True), 64)
+        assert first_key in tok._encode_text_cache
+        assert second_key not in tok._encode_text_cache
+        assert third_key in tok._encode_text_cache
+        cache_path = tok.save_cache()
+        assert cache_path and os.path.exists(cache_path)
+        tok_path = os.path.join(raw, "tokenizer.json")
+        tok.save(tok_path)
+        loaded = SimpleSubwordTokenizer.load(tok_path)
+        assert loaded.enable_cache(raw, load=True) is None
+        loaded_stats = loaded.cache_stats()
+        assert loaded_stats["encode_entries"] >= 2
+        assert loaded_stats["word_entries"] >= 1
+        before = loaded_stats["hit_rate"]
+        ids_loaded = loaded.encode(first, max_tokens=64)
+        assert ids_loaded == ids_first
+        assert loaded.cache_stats()["hit_rate"] >= before
 
 
 def test_binary_compressed_and_incremental_checkpoint_roundtrip():
@@ -70,7 +125,9 @@ def test_native_dendrite_and_cortical_topk_paths():
 
 
 if __name__ == "__main__":
+    test_text_normalization_and_vietnamese_detection()
     test_subword_tokenizer_byte_fallback_cache_and_vietnamese()
+    test_subword_tokenizer_lru_cache_and_persistent_reload()
     test_binary_compressed_and_incremental_checkpoint_roundtrip()
     test_native_dendrite_and_cortical_topk_paths()
     print("Tokenizer/checkpoint/native OK")

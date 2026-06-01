@@ -22,6 +22,8 @@ import numpy as np
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from lsl import SemanticSDREncoder, hamming_overlap
+from lsl.semantic_aliases import MULTILINGUAL_CONCEPT_ALIASES, MULTILINGUAL_TRANSLATION_PAIRS
+from lsl.text_normalization import lexical_key, token_variants
 
 
 DEFAULT_SIZES = (1000, 10000, 100000)

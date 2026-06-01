@@ -8,7 +8,7 @@ import time
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from lsl import DatasetConfig, DatasetLoader, LSLCoreModel, write_result
+from lsl import DatasetConfig, DatasetLoader, LSLCoreModel, RUNTIME_PROFILE_CHOICES, write_result
 
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -41,7 +41,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tokenizer-train-chars", type=int, default=250000)
     parser.add_argument("--vocab-size", type=int, default=8000)
     parser.add_argument("--candidate-cap", type=int, default=128)
-    parser.add_argument("--lsl-profile", choices=["full", "native_long_context", "native_fast", "bio_native"], default="native_fast")
+    parser.add_argument("--lsl-profile", choices=list(RUNTIME_PROFILE_CHOICES), default="native_fast")
+    parser.add_argument("--load-checkpoint", type=str, default=None, help="resume training from an existing checkpoint before saving the new output checkpoint")
     parser.add_argument("--checkpoint", type=str, default=None)
     parser.add_argument("--json-output", type=str, default=None)
     parser.add_argument("--results-root", type=str, default="results")
@@ -56,12 +57,18 @@ def main() -> int:
     args = parse_args()
     text, path = read_text(args)
     checkpoint = args.checkpoint or os.path.join("checkpoints", f"lsl_{args.dataset}.json")
-    model = LSLCoreModel(
-        vocab_size=args.vocab_size,
-        seed=args.seed,
-        candidate_cap=args.candidate_cap,
-        runtime_profile=args.lsl_profile,
-    )
+    if args.load_checkpoint:
+        model = LSLCoreModel.load(args.load_checkpoint)
+        model.set_runtime_profile(args.lsl_profile)
+        loaded_checkpoint = os.path.abspath(args.load_checkpoint)
+    else:
+        model = LSLCoreModel(
+            vocab_size=args.vocab_size,
+            seed=args.seed,
+            candidate_cap=args.candidate_cap,
+            runtime_profile=args.lsl_profile,
+        )
+        loaded_checkpoint = None
     started = time.perf_counter()
     metrics = model.train_stream([text], tokenizer_text_chars=args.tokenizer_train_chars, max_tokens=args.max_tokens)
     elapsed = time.perf_counter() - started
@@ -75,6 +82,7 @@ def main() -> int:
         "split": args.split,
         "corpus_path": path,
         "checkpoint": os.path.abspath(checkpoint),
+        "loaded_checkpoint": loaded_checkpoint,
         "success": True,
         "metrics": {
             **metrics,
@@ -93,6 +101,8 @@ def main() -> int:
     print(f"Dataset:          {args.dataset}")
     print(f"Corpus:           {path}")
     print(f"Checkpoint:       {os.path.abspath(checkpoint)}")
+    if loaded_checkpoint:
+        print(f"Loaded:           {loaded_checkpoint}")
     print(f"Tokens:           {int(metrics['tokens']):,}")
     print(f"Train tok/s:      {payload['metrics']['tokens_per_second']:.2f}")
     print(f"us/token:         {metrics['us_per_token']:.2f}")

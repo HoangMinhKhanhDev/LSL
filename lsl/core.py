@@ -27,6 +27,10 @@ from .sparse_native import NATIVE_AVAILABLE
 from .synapse import LivingSynapseLayer
 
 
+RUNTIME_PROFILE_CHOICES = ("full", "native_long_context", "native_fast", "bio_native", "continual")
+RUNTIME_PROFILE_ALIASES = {"continual": "bio_native"}
+
+
 @dataclass
 class LSLCoreConfig:
     vocab_size: int = 8000
@@ -48,6 +52,8 @@ class LSLCoreConfig:
     bio_hippocampus_weight: float = 1.0
     bio_generation_candidate_limit: int = 32
     bio_maintenance_interval: int = 4096
+    bio_sidecar_stride: int = 1
+    bio_sidecar_warmup_tokens: int = 0
     bio_dendrite_max_branches: int = 65536
     bio_column_max_segments: int = 65536
     bio_column_max_contexts: int = 65536
@@ -76,6 +82,9 @@ class LSLCoreModel:
             use_columns=full_modules,
             use_neuromodulation=full_modules,
         )
+        if profile == "bio_native":
+            self.config.bio_sidecar_stride = max(4, int(getattr(self.config, "bio_sidecar_stride", 1)))
+            self.config.bio_sidecar_warmup_tokens = max(256, int(getattr(self.config, "bio_sidecar_warmup_tokens", 0)))
         self.tokenizer_built = False
         self.prev_token: Optional[int] = None
         self.seen_tokens = 0
@@ -175,6 +184,7 @@ class LSLCoreModel:
     @staticmethod
     def _runtime_profile_from_config(config: LSLCoreConfig) -> str:
         profile = str(getattr(config, "runtime_profile", "full")).strip().lower().replace("-", "_")
+        profile = RUNTIME_PROFILE_ALIASES.get(profile, profile)
         if profile not in {"full", "native_long_context", "native_fast", "bio_native"}:
             raise ValueError(f"Unsupported LSL runtime profile: {profile}")
         return profile
@@ -197,6 +207,14 @@ class LSLCoreModel:
         self.agent.use_neuromodulation = full_modules
         if runtime == "native_fast":
             self.config.consolidation_interval = 0
+            self.config.bio_sidecar_stride = 1
+            self.config.bio_sidecar_warmup_tokens = 0
+        elif runtime == "bio_native":
+            self.config.bio_sidecar_stride = max(4, int(getattr(self.config, "bio_sidecar_stride", 1)))
+            self.config.bio_sidecar_warmup_tokens = max(256, int(getattr(self.config, "bio_sidecar_warmup_tokens", 0)))
+        else:
+            self.config.bio_sidecar_stride = 1
+            self.config.bio_sidecar_warmup_tokens = 0
 
     @property
     def vocab_size(self) -> int:
@@ -356,9 +374,9 @@ class LSLCoreModel:
         return stats
 
     def _bio_modulation(self, token: int, surprise: float, learn: bool) -> Dict[str, float]:
-        gates = self.agent.bio_modulator.gates(str(int(token)), surprise=float(surprise))
+        gates = self.agent.bio_modulator.gates(f"tok:{int(token)}", surprise=float(surprise))
         if learn:
-            self.agent.bio_modulator.observe(str(int(token)), surprise=float(surprise))
+            self.agent.bio_modulator.observe_token_id(int(token), surprise=float(surprise))
         self.bio_native_stats["neuromod_steps"] += 1.0
         return gates
 
@@ -373,7 +391,7 @@ class LSLCoreModel:
         del pc_stats
         bits = self._bio_sdr_bits(token)
         if prev_token is not None:
-            self.agent.sdr_v2.observe_related(str(int(prev_token)), str(int(token)))
+            self.agent.sdr_v2.observe_related_ids(int(prev_token), int(token))
 
         if token < self.agent.columns.vocab_size:
             col = self.agent.columns.forward(token, learn=learn)
@@ -382,8 +400,8 @@ class LSLCoreModel:
                 self.bio_native_stats["column_predicted"] += 1.0
 
         if learn and prev_token is not None:
-            written = self.agent.hippocampus.observe(
-                ["transition", str(int(prev_token))],
+            written = self.agent.hippocampus.observe_transition_ids(
+                int(prev_token),
                 str(int(token)),
                 surprise=float(surprise),
             )
@@ -450,8 +468,12 @@ class LSLCoreModel:
             self._native_observe_transition(prev, token, lr_scale=lr_scale)
             self.agent.long_context.observe_transition(prev, token, vocab_size=self.vocab_size)
             self.agent.homeostasis.observe(active_count=1, total_count=max(1, self.vocab_size), local_error=pc_error)
-
-        self._bio_observe_sidecars(prev, token, learn=learn, surprise=surprise, pc_stats=pc_stats)
+        sidecar_stride = max(1, int(getattr(self.config, "bio_sidecar_stride", 1)))
+        warmup = max(0, int(getattr(self.config, "bio_sidecar_warmup_tokens", 0)))
+        if self.seen_tokens < warmup:
+            sidecar_stride = 1
+        if sidecar_stride <= 1 or (self.seen_tokens % sidecar_stride == 0):
+            self._bio_observe_sidecars(prev, token, learn=learn, surprise=surprise, pc_stats=pc_stats)
 
     def _native_predict(self, token_id: int) -> tuple[Optional[int], float]:
         summary = self._native_score_summary(token_id)
@@ -686,7 +708,7 @@ class LSLCoreModel:
             agent_token = self.agent.predict_next_token_id(tokens)
             if agent_token is not None:
                 votes[int(agent_token)] += float(self.config.bio_column_weight)
-            recalled = self.agent.hippocampus.recall(["transition", str(current)])
+            recalled = self.agent.hippocampus.recall_transition_id(current)
             if recalled is not None:
                 try:
                     votes[int(recalled) % self.vocab_size] += float(self.config.bio_hippocampus_weight)
@@ -870,12 +892,13 @@ class LSLCoreModel:
         with open(path, "wb") as f:
             f.write(payload)
 
-    def save_binary(self, path: str, compression_level: int = 9) -> Dict[str, object]:
+    def save_binary(self, path: str, compression_level: int = 0) -> Dict[str, object]:
+        mode = "raw_sparse" if int(compression_level) <= 0 else "compressed_sparse"
         info = save_checkpoint(
             self,
             path,
             compression_level=int(compression_level),
-            mode="compressed_sparse",
+            mode=mode,
             extra={
                 "vocab_size": int(self.vocab_size),
                 "seen_tokens": int(self.seen_tokens),
@@ -885,10 +908,10 @@ class LSLCoreModel:
         self.last_checkpoint_info = dict(info)
         return info
 
-    def save_compressed_sparse(self, path: str, compression_level: int = 9) -> Dict[str, object]:
+    def save_compressed_sparse(self, path: str, compression_level: int = 3) -> Dict[str, object]:
         return self.save_binary(path, compression_level=compression_level)
 
-    def save_incremental(self, path: str, parent: Optional[str] = None, compression_level: int = 9) -> Dict[str, object]:
+    def save_incremental(self, path: str, parent: Optional[str] = None, compression_level: int = 0) -> Dict[str, object]:
         info = append_checkpoint(
             self,
             path,
@@ -922,7 +945,7 @@ class LSLCoreModel:
         return model
 
     @classmethod
-    def migrate_checkpoint(cls, input_path: str, output_path: str, compression_level: int = 9) -> Dict[str, object]:
+    def migrate_checkpoint(cls, input_path: str, output_path: str, compression_level: int = 3) -> Dict[str, object]:
         info = migrate_checkpoint(input_path, output_path, compression_level=int(compression_level))
         model = cls.load(output_path)
         if not isinstance(model, cls):

@@ -37,6 +37,7 @@ def build_tokenizer(kind: str, vocab_size: int, text: str, cache_dir: str | None
             vocab_size=vocab_size,
             max_merges=800,
             min_pair_count=2,
+            compatibility_normalization=True,
             vietnamese_normalization=vietnamese,
             normalization_form="NFC",
             byte_fallback=True,
@@ -64,9 +65,6 @@ def bench_one(args: argparse.Namespace, loader: DatasetLoader, dataset: str, kin
     train_text = splits.train[: int(args.train_chars)]
     eval_text = (splits.validation or splits.test or splits.train)[: int(args.eval_chars)]
     tokenizer, train_seconds = build_tokenizer(kind, int(args.vocab_size), train_text, args.cache_dir, dataset)
-    persistent_cache_entries = 0.0
-    if hasattr(tokenizer, "cache_stats"):
-        persistent_cache_entries = float(tokenizer.cache_stats().get("encode_entries", 0.0))
     if hasattr(tokenizer, "_encode_text_cache"):
         tokenizer._encode_text_cache.clear()
     if hasattr(tokenizer, "_decode_cache"):
@@ -81,13 +79,34 @@ def bench_one(args: argparse.Namespace, loader: DatasetLoader, dataset: str, kin
     if hasattr(tokenizer, "save_cache"):
         cache_path = tokenizer.save_cache()
     tokenizer_path = None
-    if dataset == "vietnamese_small" or tokenizer_name(tokenizer) == "subword_vi":
+    if hasattr(tokenizer, "save"):
         tokenizer_path = os.path.abspath(os.path.join(args.tokenizer_output_dir, f"{dataset}_{tokenizer_name(tokenizer)}.json"))
-        if hasattr(tokenizer, "save"):
-            tokenizer.save(tokenizer_path)
+        tokenizer.save(tokenizer_path)
 
     unk_rate = float(tokenizer.unk_rate(ids)) if hasattr(tokenizer, "unk_rate") else 0.0
     cache_stats = tokenizer.cache_stats() if hasattr(tokenizer, "cache_stats") else {}
+    persistent_cache_loaded = False
+    persistent_cache_entries_loaded = 0.0
+    persistent_cache_load_seconds = 0.0
+    persistent_encode_seconds = 0.0
+    persistent_decode_seconds = 0.0
+    persistent_cached_encode_tps = 0.0
+    persistent_cached_decode_tps = 0.0
+    persistent_cache_hit_rate = 0.0
+    persistent_token_match = False
+    if cache_path and tokenizer_path and isinstance(tokenizer, SimpleSubwordTokenizer):
+        load_started = time.perf_counter()
+        persistent = SimpleSubwordTokenizer.load(tokenizer_path)
+        persistent.enable_cache(os.path.dirname(cache_path), load=True)
+        persistent_cache_load_seconds = time.perf_counter() - load_started
+        persistent_cache_loaded = True
+        persistent_cache_entries_loaded = float(persistent.cache_stats().get("encode_entries", 0.0))
+        persistent_ids, persistent_encode_seconds = timed_call(lambda: persistent.encode(eval_text, max_tokens=int(args.max_tokens)))
+        _, persistent_decode_seconds = timed_call(lambda: persistent.decode(ids))
+        persistent_cached_encode_tps = float(len(persistent_ids) / max(persistent_encode_seconds, 1e-12))
+        persistent_cached_decode_tps = float(len(ids) / max(persistent_decode_seconds, 1e-12))
+        persistent_cache_hit_rate = float(persistent.cache_stats().get("hit_rate", 0.0))
+        persistent_token_match = persistent_ids == ids
     return {
         "dataset": dataset,
         "language": splits.language,
@@ -106,8 +125,16 @@ def bench_one(args: argparse.Namespace, loader: DatasetLoader, dataset: str, kin
         "decode_tokens_per_second": float(len(ids) / max(decode_seconds, 1e-12)),
         "cached_encode_tokens_per_second": float(len(ids) / max(encode_cached_seconds, 1e-12)),
         "cached_decode_tokens_per_second": float(len(ids) / max(decode_cached_seconds, 1e-12)),
+        "persistent_cache_loaded": persistent_cache_loaded,
+        "persistent_cache_load_seconds": float(persistent_cache_load_seconds),
+        "persistent_cache_entries_loaded": persistent_cache_entries_loaded,
+        "persistent_encode_seconds": float(persistent_encode_seconds),
+        "persistent_decode_seconds": float(persistent_decode_seconds),
+        "persistent_cached_encode_tokens_per_second": float(persistent_cached_encode_tps),
+        "persistent_cached_decode_tokens_per_second": float(persistent_cached_decode_tps),
+        "persistent_cache_hit_rate": persistent_cache_hit_rate,
+        "persistent_token_match": persistent_token_match,
         "roundtrip_chars": int(len(decoded)),
-        "persistent_cache_entries_loaded": persistent_cache_entries,
         "cache": cache_stats,
         "cache_path": cache_path,
         "tokenizer_path": tokenizer_path,
@@ -145,7 +172,8 @@ def main() -> int:
             print(
                 f"{dataset:<18} {row['tokenizer']:<10} "
                 f"unk={row['unk_rate']:.4f} encode_tps={row['encode_tokens_per_second']:.1f} "
-                f"cached={row['cached_encode_tokens_per_second']:.1f}"
+                f"cached={row['cached_encode_tokens_per_second']:.1f} "
+                f"persist={row['persistent_cached_encode_tokens_per_second']:.1f}"
             )
     payload = {
         "benchmark": "tokenizer_quality_speed",

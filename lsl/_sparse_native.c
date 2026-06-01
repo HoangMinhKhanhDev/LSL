@@ -1,6 +1,8 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <math.h>
+#include <stdlib.h>
+#include <string.h>
 #include <numpy/arrayobject.h>
 
 
@@ -479,6 +481,128 @@ static int contains_active(PyArrayObject *active, npy_intp active_count, npy_int
 }
 
 
+static inline int active_contains_sorted(const npy_intp *active, npy_intp active_count, npy_intp bit) {
+    npy_intp lo = 0;
+    npy_intp hi = active_count - 1;
+    while (lo <= hi) {
+        npy_intp mid = lo + ((hi - lo) >> 1);
+        npy_intp value = active[mid];
+        if (value == bit) {
+            return 1;
+        }
+        if (value < bit) {
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    return 0;
+}
+
+
+static inline int active_contains_lookup(
+    const unsigned char *mask,
+    npy_intp mask_size,
+    const npy_intp *sorted,
+    npy_intp sorted_count,
+    npy_intp bit
+) {
+    if (mask != NULL) {
+        return bit >= 0 && bit < mask_size && mask[bit] != 0;
+    }
+    return active_contains_sorted(sorted, sorted_count, bit);
+}
+
+
+typedef struct {
+    npy_intp index;
+    float value;
+} TopKItem;
+
+
+static int compare_npy_intp_ascending(const void *left, const void *right) {
+    const npy_intp a = *(const npy_intp *)left;
+    const npy_intp b = *(const npy_intp *)right;
+    if (a < b) {
+        return -1;
+    }
+    if (a > b) {
+        return 1;
+    }
+    return 0;
+}
+
+
+static int compare_topk_descending(const void *left, const void *right) {
+    const TopKItem *a = (const TopKItem *)left;
+    const TopKItem *b = (const TopKItem *)right;
+    if (a->value > b->value) {
+        return -1;
+    }
+    if (a->value < b->value) {
+        return 1;
+    }
+    if (a->index > b->index) {
+        return -1;
+    }
+    if (a->index < b->index) {
+        return 1;
+    }
+    return 0;
+}
+
+
+static inline int topk_is_better(const TopKItem *candidate, const TopKItem *baseline) {
+    if (candidate->value > baseline->value) {
+        return 1;
+    }
+    if (candidate->value < baseline->value) {
+        return 0;
+    }
+    return candidate->index > baseline->index;
+}
+
+
+static void topk_swap(TopKItem *left, TopKItem *right) {
+    TopKItem tmp = *left;
+    *left = *right;
+    *right = tmp;
+}
+
+
+static void topk_heap_sift_up(TopKItem *heap, npy_intp index) {
+    while (index > 0) {
+        npy_intp parent = (index - 1) / 2;
+        if (!topk_is_better(&heap[parent], &heap[index])) {
+            break;
+        }
+        topk_swap(&heap[parent], &heap[index]);
+        index = parent;
+    }
+}
+
+
+static void topk_heap_sift_down(TopKItem *heap, npy_intp size) {
+    npy_intp index = 0;
+    while (1) {
+        npy_intp left = index * 2 + 1;
+        npy_intp right = left + 1;
+        npy_intp worst = index;
+        if (left < size && !topk_is_better(&heap[left], &heap[worst])) {
+            worst = left;
+        }
+        if (right < size && !topk_is_better(&heap[right], &heap[worst])) {
+            worst = right;
+        }
+        if (worst == index) {
+            break;
+        }
+        topk_swap(&heap[index], &heap[worst]);
+        index = worst;
+    }
+}
+
+
 static int is_word_char(Py_UCS4 ch) {
     return Py_UNICODE_ISALNUM(ch) || ch == '_';
 }
@@ -591,6 +715,41 @@ static PyObject *best_signature_match(PyObject *self, PyObject *args) {
         goto match_fail;
     }
 
+    npy_intp query_max = -1;
+    const npy_intp *query_data = (const npy_intp *)PyArray_DATA(query);
+    for (npy_intp i = 0; i < active_count; i++) {
+        if (query_data[i] > query_max) {
+            query_max = query_data[i];
+        }
+    }
+    unsigned char *query_mask = NULL;
+    npy_intp query_mask_size = 0;
+    npy_intp *query_sorted = NULL;
+    if (active_count > 0) {
+        if (query_max >= 0 && query_max <= 1048576) {
+            query_mask_size = query_max + 1;
+            query_mask = (unsigned char *)PyMem_Calloc((size_t)query_mask_size, sizeof(unsigned char));
+            if (!query_mask) {
+                PyErr_NoMemory();
+                goto match_fail;
+            }
+            for (npy_intp i = 0; i < active_count; i++) {
+                npy_intp bit = query_data[i];
+                if (bit >= 0 && bit < query_mask_size) {
+                    query_mask[bit] = 1;
+                }
+            }
+        } else {
+            query_sorted = (npy_intp *)PyMem_Malloc((size_t)active_count * sizeof(npy_intp));
+            if (!query_sorted) {
+                PyErr_NoMemory();
+                goto match_fail;
+            }
+            memcpy(query_sorted, query_data, (size_t)active_count * sizeof(npy_intp));
+            qsort(query_sorted, (size_t)active_count, sizeof(npy_intp), compare_npy_intp_ascending);
+        }
+    }
+
     npy_intp best_position = -1;
     npy_intp best_value = -1;
     npy_intp best_score = -1;
@@ -610,7 +769,7 @@ static PyObject *best_signature_match(PyObject *self, PyObject *args) {
                 continue;
             }
             ops += 1;
-            if (contains_active(query, active_count, bit)) {
+            if (active_contains_lookup(query_mask, query_mask_size, query_sorted, active_count, bit)) {
                 score += 1;
             }
         }
@@ -630,6 +789,8 @@ static PyObject *best_signature_match(PyObject *self, PyObject *args) {
         "candidate_count", candidate_count,
         "ops", ops
     );
+    PyMem_Free(query_mask);
+    PyMem_Free(query_sorted);
     Py_DECREF(query);
     Py_DECREF(signatures);
     Py_DECREF(lengths);
@@ -637,6 +798,8 @@ static PyObject *best_signature_match(PyObject *self, PyObject *args) {
     return stats;
 
 match_fail:
+    PyMem_Free(query_mask);
+    PyMem_Free(query_sorted);
     Py_XDECREF(query);
     Py_XDECREF(signatures);
     Py_XDECREF(lengths);
@@ -698,44 +861,65 @@ static PyObject *forward_active_batch(PyObject *self, PyObject *args) {
 
     npy_intp ops = 0;
     npy_intp touched = 0;
+    const char *slow_base = PyArray_BYTES(slow);
+    const char *live_base = PyArray_BYTES(live);
+    char *fatigue_base = PyArray_BYTES(fatigue);
+    float *post_data = (float *)PyArray_DATA(post);
+    const npy_intp slow_row_stride = PyArray_STRIDES(slow)[0];
+    const npy_intp slow_col_stride = PyArray_STRIDES(slow)[1];
+    const npy_intp live_row_stride = PyArray_STRIDES(live)[0];
+    const npy_intp live_col_stride = PyArray_STRIDES(live)[1];
+    const npy_intp fatigue_row_stride = PyArray_STRIDES(fatigue)[0];
+    const npy_intp fatigue_col_stride = PyArray_STRIDES(fatigue)[1];
+    const npy_intp *active_data = (const npy_intp *)PyArray_DATA(active);
+    const float *values_data = (const float *)PyArray_DATA(values);
+    const npy_intp *lengths_data = (const npy_intp *)PyArray_DATA(lengths);
     for (npy_intp row = 0; row < batch; row++) {
-        npy_intp active_count = *(npy_intp *)PyArray_GETPTR1(lengths, row);
+        npy_intp active_count = lengths_data[row];
         if (active_count < 0) {
             active_count = 0;
         }
         if (active_count > width) {
             active_count = width;
         }
+        const npy_intp *active_row = active_data + row * width;
+        const float *values_row = values_data + row * width;
         float max_abs = 1.0e-8f;
         for (npy_intp out = 0; out < out_dim; out++) {
+            const char *slow_row = slow_base + out * slow_row_stride;
+            const char *live_row = live_base + out * live_row_stride;
+            char *fatigue_row = fatigue_base + out * fatigue_row_stride;
             float acc = 0.0f;
             for (npy_intp j = 0; j < active_count; j++) {
-                npy_intp col = *(npy_intp *)PyArray_GETPTR2(active, row, j);
+                npy_intp col = active_row[j];
                 if (col < 0 || col >= in_dim) {
                     Py_DECREF(post);
                     PyErr_SetString(PyExc_IndexError, "active index out of bounds");
                     goto batch_fail;
                 }
-                float value = *(float *)PyArray_GETPTR2(values, row, j);
-                float ws = *(float *)PyArray_GETPTR2(slow, out, col);
-                float wl = *(float *)PyArray_GETPTR2(live, out, col);
-                float f = *(float *)PyArray_GETPTR2(fatigue, out, col);
+                float value = values_row[j];
+                float ws = *(float *)(slow_row + col * slow_col_stride);
+                float wl = *(float *)(live_row + col * live_col_stride);
+                float f = *(float *)(fatigue_row + col * fatigue_col_stride);
                 acc += (ws + wl) * (1.0f - f) * value;
                 ops += 1;
                 touched += 1;
             }
-            *(float *)PyArray_GETPTR2(post, row, out) = acc;
+            post_data[row * out_dim + out] = acc;
             float a = fabsf(acc);
             if (a > max_abs) {
                 max_abs = a;
             }
         }
         for (npy_intp out = 0; out < out_dim; out++) {
-            float p = *(float *)PyArray_GETPTR2(post, row, out);
+            const char *slow_row = slow_base + out * slow_row_stride;
+            const char *live_row = live_base + out * live_row_stride;
+            char *fatigue_row = fatigue_base + out * fatigue_row_stride;
+            float p = post_data[row * out_dim + out];
             for (npy_intp j = 0; j < active_count; j++) {
-                npy_intp col = *(npy_intp *)PyArray_GETPTR2(active, row, j);
-                float value = *(float *)PyArray_GETPTR2(values, row, j);
-                float old = *(float *)PyArray_GETPTR2(fatigue, out, col);
+                npy_intp col = active_row[j];
+                float value = values_row[j];
+                float old = *(float *)(fatigue_row + col * fatigue_col_stride);
                 float sig = fabsf(p * value) / max_abs;
                 float next = 0.98f * old + 0.02f * sig;
                 if (next < 0.0f) {
@@ -743,7 +927,7 @@ static PyObject *forward_active_batch(PyObject *self, PyObject *args) {
                 } else if (next > 0.9f) {
                     next = 0.9f;
                 }
-                *(float *)PyArray_GETPTR2(fatigue, out, col) = next;
+                *(float *)(fatigue_row + col * fatigue_col_stride) = next;
             }
         }
     }
@@ -821,69 +1005,112 @@ static PyObject *dendrite_predict(PyObject *self, PyObject *args) {
         goto dendrite_fail;
     }
 
-    npy_intp *vote_outputs = (npy_intp *)PyMem_Calloc((size_t)branch_count, sizeof(npy_intp));
-    double *vote_scores = (double *)PyMem_Calloc((size_t)branch_count, sizeof(double));
-    if (!vote_outputs || !vote_scores) {
-        PyMem_Free(vote_outputs);
-        PyMem_Free(vote_scores);
+    const npy_intp *active_data = (const npy_intp *)PyArray_DATA(active);
+    npy_intp active_max = -1;
+    for (npy_intp i = 0; i < active_count; i++) {
+        if (active_data[i] > active_max) {
+            active_max = active_data[i];
+        }
+    }
+    unsigned char *active_mask = NULL;
+    npy_intp active_mask_size = 0;
+    npy_intp *active_sorted = NULL;
+    if (active_count > 0) {
+        if (active_max >= 0 && active_max <= 1048576) {
+            active_mask_size = active_max + 1;
+            active_mask = (unsigned char *)PyMem_Calloc((size_t)active_mask_size, sizeof(unsigned char));
+            if (!active_mask) {
+                PyErr_NoMemory();
+                goto dendrite_fail;
+            }
+            for (npy_intp i = 0; i < active_count; i++) {
+                npy_intp bit = active_data[i];
+                if (bit >= 0 && bit < active_mask_size) {
+                    active_mask[bit] = 1;
+                }
+            }
+        } else {
+            active_sorted = (npy_intp *)PyMem_Malloc((size_t)active_count * sizeof(npy_intp));
+            if (!active_sorted) {
+                PyErr_NoMemory();
+                goto dendrite_fail;
+            }
+            memcpy(active_sorted, active_data, (size_t)active_count * sizeof(npy_intp));
+            qsort(active_sorted, (size_t)active_count, sizeof(npy_intp), compare_npy_intp_ascending);
+        }
+    }
+
+    npy_intp max_output = -1;
+    const npy_intp *output_data = (const npy_intp *)PyArray_DATA(outputs);
+    for (npy_intp i = 0; i < branch_count; i++) {
+        if (output_data[i] > max_output) {
+            max_output = output_data[i];
+        }
+    }
+    if (max_output < 0) {
+        max_output = 0;
+    }
+    double *vote_scores = (double *)PyMem_Calloc((size_t)(max_output + 1), sizeof(double));
+    if (!vote_scores) {
         PyErr_NoMemory();
         goto dendrite_fail;
     }
 
-    npy_intp unique = 0;
     npy_intp active_branches = 0;
     npy_intp ops = 0;
+    const npy_intp *lengths_data = (const npy_intp *)PyArray_DATA(lengths);
+    const float *thresholds_data = (const float *)PyArray_DATA(thresholds);
+    const float *strengths_data = (const float *)PyArray_DATA(strengths);
+    const npy_intp *bits_base = (const npy_intp *)PyArray_DATA(bits);
+    const char *weights_base = (const char *)PyArray_DATA(weights);
+    const npy_intp bits_row_stride = PyArray_STRIDES(bits)[0] / (npy_intp)sizeof(npy_intp);
+    const npy_intp bits_col_stride = PyArray_STRIDES(bits)[1] / (npy_intp)sizeof(npy_intp);
+    const npy_intp weights_row_stride = PyArray_STRIDES(weights)[0];
+    const npy_intp weights_col_stride = PyArray_STRIDES(weights)[1];
     for (npy_intp b = 0; b < branch_count; b++) {
-        npy_intp length = *(npy_intp *)PyArray_GETPTR1(lengths, b);
+        npy_intp length = lengths_data[b];
         if (length < 0) {
             length = 0;
         }
         if (length > branch_width) {
             length = branch_width;
         }
+        const npy_intp *bits_row = bits_base + b * bits_row_stride;
+        const char *weights_row = weights_base + b * weights_row_stride;
         float drive = 0.0f;
         for (npy_intp j = 0; j < length; j++) {
             ops += active_count;
-            npy_intp bit = *(npy_intp *)PyArray_GETPTR2(bits, b, j);
-            if (contains_active(active, active_count, bit)) {
-                drive += *(float *)PyArray_GETPTR2(weights, b, j);
+            npy_intp bit = bits_row[j * bits_col_stride];
+            if (active_contains_lookup(active_mask, active_mask_size, active_sorted, active_count, bit)) {
+                drive += *(float *)(weights_row + j * weights_col_stride);
             }
         }
-        float threshold = *(float *)PyArray_GETPTR1(thresholds, b);
+        float threshold = thresholds_data[b];
         float activation = 1.0f / (1.0f + expf(-(drive - threshold)));
         if (activation < 0.5f) {
             continue;
         }
         active_branches += 1;
-        npy_intp output = *(npy_intp *)PyArray_GETPTR1(outputs, b);
-        double vote = (double)(*(float *)PyArray_GETPTR1(strengths, b)) * (double)activation;
-        npy_intp found = -1;
-        for (npy_intp i = 0; i < unique; i++) {
-            if (vote_outputs[i] == output) {
-                found = i;
-                break;
-            }
+        npy_intp output = output_data[b];
+        if (output < 0 || output > max_output) {
+            continue;
         }
-        if (found < 0) {
-            found = unique;
-            vote_outputs[unique] = output;
-            vote_scores[unique] = 0.0;
-            unique += 1;
-        }
-        vote_scores[found] += vote;
+        double vote = (double)strengths_data[b] * (double)activation;
+        vote_scores[output] += vote;
     }
 
     npy_intp best_output = -1;
     double best_score = 0.0;
-    for (npy_intp i = 0; i < unique; i++) {
-        if (best_output < 0 || vote_scores[i] > best_score ||
-            (vote_scores[i] == best_score && vote_outputs[i] < best_output)) {
-            best_output = vote_outputs[i];
+    for (npy_intp i = 0; i <= max_output; i++) {
+        if (vote_scores[i] > best_score ||
+            (vote_scores[i] == best_score && best_output >= 0 && i < best_output)) {
+            best_output = i;
             best_score = vote_scores[i];
         }
     }
 
-    PyMem_Free(vote_outputs);
+    PyMem_Free(active_mask);
+    PyMem_Free(active_sorted);
     PyMem_Free(vote_scores);
     Py_DECREF(bits);
     Py_DECREF(lengths);
@@ -903,6 +1130,8 @@ static PyObject *dendrite_predict(PyObject *self, PyObject *args) {
     );
 
 dendrite_fail:
+    PyMem_Free(active_mask);
+    PyMem_Free(active_sorted);
     Py_XDECREF(bits);
     Py_XDECREF(lengths);
     Py_XDECREF(weights);
@@ -910,6 +1139,202 @@ dendrite_fail:
     Py_XDECREF(strengths);
     Py_XDECREF(outputs);
     Py_XDECREF(active);
+    return NULL;
+}
+
+
+static PyObject *dendrite_predict_candidates(PyObject *self, PyObject *args) {
+    PyObject *bits_obj;
+    PyObject *lengths_obj;
+    PyObject *weights_obj;
+    PyObject *thresholds_obj;
+    PyObject *strengths_obj;
+    PyObject *outputs_obj;
+    PyObject *active_obj;
+    PyObject *candidate_ids_obj;
+    if (!PyArg_ParseTuple(args, "OOOOOOOO", &bits_obj, &lengths_obj, &weights_obj, &thresholds_obj, &strengths_obj, &outputs_obj, &active_obj, &candidate_ids_obj)) {
+        return NULL;
+    }
+
+    PyArrayObject *bits = (PyArrayObject *)PyArray_FROM_OTF(bits_obj, NPY_INTP, NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_ALIGNED);
+    PyArrayObject *lengths = (PyArrayObject *)PyArray_FROM_OTF(lengths_obj, NPY_INTP, NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_ALIGNED);
+    PyArrayObject *weights = (PyArrayObject *)PyArray_FROM_OTF(weights_obj, NPY_FLOAT32, NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_ALIGNED);
+    PyArrayObject *thresholds = (PyArrayObject *)PyArray_FROM_OTF(thresholds_obj, NPY_FLOAT32, NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_ALIGNED);
+    PyArrayObject *strengths = (PyArrayObject *)PyArray_FROM_OTF(strengths_obj, NPY_FLOAT32, NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_ALIGNED);
+    PyArrayObject *outputs = (PyArrayObject *)PyArray_FROM_OTF(outputs_obj, NPY_INTP, NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_ALIGNED);
+    PyArrayObject *active = (PyArrayObject *)PyArray_FROM_OTF(active_obj, NPY_INTP, NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_ALIGNED);
+    PyArrayObject *candidate_ids = (PyArrayObject *)PyArray_FROM_OTF(candidate_ids_obj, NPY_INTP, NPY_ARRAY_C_CONTIGUOUS | NPY_ARRAY_ALIGNED);
+
+    if (!bits || !lengths || !weights || !thresholds || !strengths || !outputs || !active || !candidate_ids) {
+        Py_XDECREF(bits);
+        Py_XDECREF(lengths);
+        Py_XDECREF(weights);
+        Py_XDECREF(thresholds);
+        Py_XDECREF(strengths);
+        Py_XDECREF(outputs);
+        Py_XDECREF(active);
+        Py_XDECREF(candidate_ids);
+        return NULL;
+    }
+    if (PyArray_NDIM(bits) != 2 || PyArray_NDIM(weights) != 2 || PyArray_NDIM(lengths) != 1 ||
+        PyArray_NDIM(thresholds) != 1 || PyArray_NDIM(strengths) != 1 || PyArray_NDIM(outputs) != 1 ||
+        PyArray_NDIM(active) != 1 || PyArray_NDIM(candidate_ids) != 1) {
+        PyErr_SetString(PyExc_ValueError, "invalid dendrite array dimensions");
+        goto dendrite_candidates_fail;
+    }
+
+    npy_intp branch_count = PyArray_DIM(bits, 0);
+    npy_intp branch_width = PyArray_DIM(bits, 1);
+    npy_intp active_count = PyArray_DIM(active, 0);
+    npy_intp candidate_count = PyArray_DIM(candidate_ids, 0);
+    if (PyArray_DIM(weights, 0) != branch_count || PyArray_DIM(weights, 1) != branch_width ||
+        PyArray_DIM(lengths, 0) != branch_count || PyArray_DIM(thresholds, 0) != branch_count ||
+        PyArray_DIM(strengths, 0) != branch_count || PyArray_DIM(outputs, 0) != branch_count) {
+        PyErr_SetString(PyExc_ValueError, "dendrite array shapes do not match");
+        goto dendrite_candidates_fail;
+    }
+
+    const npy_intp *active_data = (const npy_intp *)PyArray_DATA(active);
+    npy_intp active_max = -1;
+    for (npy_intp i = 0; i < active_count; i++) {
+        if (active_data[i] > active_max) {
+            active_max = active_data[i];
+        }
+    }
+    unsigned char *active_mask = NULL;
+    npy_intp active_mask_size = 0;
+    npy_intp *active_sorted = NULL;
+    if (active_count > 0) {
+        if (active_max >= 0 && active_max <= 1048576) {
+            active_mask_size = active_max + 1;
+            active_mask = (unsigned char *)PyMem_Calloc((size_t)active_mask_size, sizeof(unsigned char));
+            if (!active_mask) {
+                PyErr_NoMemory();
+                goto dendrite_candidates_fail;
+            }
+            for (npy_intp i = 0; i < active_count; i++) {
+                npy_intp bit = active_data[i];
+                if (bit >= 0 && bit < active_mask_size) {
+                    active_mask[bit] = 1;
+                }
+            }
+        } else {
+            active_sorted = (npy_intp *)PyMem_Malloc((size_t)active_count * sizeof(npy_intp));
+            if (!active_sorted) {
+                PyErr_NoMemory();
+                goto dendrite_candidates_fail;
+            }
+            memcpy(active_sorted, active_data, (size_t)active_count * sizeof(npy_intp));
+            qsort(active_sorted, (size_t)active_count, sizeof(npy_intp), compare_npy_intp_ascending);
+        }
+    }
+
+    npy_intp max_output = -1;
+    const npy_intp *output_data = (const npy_intp *)PyArray_DATA(outputs);
+    for (npy_intp i = 0; i < branch_count; i++) {
+        if (output_data[i] > max_output) {
+            max_output = output_data[i];
+        }
+    }
+    if (max_output < 0) {
+        max_output = 0;
+    }
+    double *vote_scores = (double *)PyMem_Calloc((size_t)(max_output + 1), sizeof(double));
+    if (!vote_scores) {
+        PyErr_NoMemory();
+        goto dendrite_candidates_fail;
+    }
+
+    npy_intp active_branches = 0;
+    npy_intp ops = 0;
+    const npy_intp *candidate_data = (const npy_intp *)PyArray_DATA(candidate_ids);
+    const npy_intp *lengths_data = (const npy_intp *)PyArray_DATA(lengths);
+    const float *thresholds_data = (const float *)PyArray_DATA(thresholds);
+    const float *strengths_data = (const float *)PyArray_DATA(strengths);
+    const npy_intp *bits_base = (const npy_intp *)PyArray_DATA(bits);
+    const char *weights_base = (const char *)PyArray_DATA(weights);
+    const npy_intp bits_row_stride = PyArray_STRIDES(bits)[0] / (npy_intp)sizeof(npy_intp);
+    const npy_intp bits_col_stride = PyArray_STRIDES(bits)[1] / (npy_intp)sizeof(npy_intp);
+    const npy_intp weights_row_stride = PyArray_STRIDES(weights)[0];
+    const npy_intp weights_col_stride = PyArray_STRIDES(weights)[1];
+    for (npy_intp idx = 0; idx < candidate_count; idx++) {
+        npy_intp b = candidate_data[idx];
+        if (b < 0 || b >= branch_count) {
+            continue;
+        }
+        npy_intp length = lengths_data[b];
+        if (length < 0) {
+            length = 0;
+        }
+        if (length > branch_width) {
+            length = branch_width;
+        }
+        const npy_intp *bits_row = bits_base + b * bits_row_stride;
+        const char *weights_row = weights_base + b * weights_row_stride;
+        float drive = 0.0f;
+        for (npy_intp j = 0; j < length; j++) {
+            ops += active_count;
+            npy_intp bit = bits_row[j * bits_col_stride];
+            if (active_contains_lookup(active_mask, active_mask_size, active_sorted, active_count, bit)) {
+                drive += *(float *)(weights_row + j * weights_col_stride);
+            }
+        }
+        float threshold = thresholds_data[b];
+        float activation = 1.0f / (1.0f + expf(-(drive - threshold)));
+        if (activation < 0.5f) {
+            continue;
+        }
+        active_branches += 1;
+        npy_intp output = output_data[b];
+        if (output < 0 || output > max_output) {
+            continue;
+        }
+        double vote = (double)strengths_data[b] * (double)activation;
+        vote_scores[output] += vote;
+    }
+
+    npy_intp best_output = -1;
+    double best_score = 0.0;
+    for (npy_intp i = 0; i <= max_output; i++) {
+        if (vote_scores[i] > best_score ||
+            (vote_scores[i] == best_score && best_output >= 0 && i < best_output)) {
+            best_output = i;
+            best_score = vote_scores[i];
+        }
+    }
+
+    PyMem_Free(active_mask);
+    PyMem_Free(active_sorted);
+    PyMem_Free(vote_scores);
+    Py_DECREF(bits);
+    Py_DECREF(lengths);
+    Py_DECREF(weights);
+    Py_DECREF(thresholds);
+    Py_DECREF(strengths);
+    Py_DECREF(outputs);
+    Py_DECREF(active);
+    Py_DECREF(candidate_ids);
+    return Py_BuildValue(
+        "{s:s,s:n,s:n,s:n,s:n,s:d}",
+        "mode", "native_dendrite_predict_candidates",
+        "ops", ops,
+        "branches", branch_count,
+        "active_branches", active_branches,
+        "best_output", best_output,
+        "best_score", best_score
+    );
+
+dendrite_candidates_fail:
+    PyMem_Free(active_mask);
+    PyMem_Free(active_sorted);
+    Py_XDECREF(bits);
+    Py_XDECREF(lengths);
+    Py_XDECREF(weights);
+    Py_XDECREF(thresholds);
+    Py_XDECREF(strengths);
+    Py_XDECREF(outputs);
+    Py_XDECREF(active);
+    Py_XDECREF(candidate_ids);
     return NULL;
 }
 
@@ -945,36 +1370,35 @@ static PyObject *topk_float32(PyObject *self, PyObject *args) {
         Py_DECREF(scores);
         return NULL;
     }
-    char *used = (char *)PyMem_Calloc((size_t)n, sizeof(char));
-    if (!used && n > 0) {
+    TopKItem *heap = (TopKItem *)PyMem_Malloc((size_t)k * sizeof(TopKItem));
+    if (!heap && k > 0) {
         Py_DECREF(indices);
         Py_DECREF(values);
         Py_DECREF(scores);
         PyErr_NoMemory();
         return NULL;
     }
-    for (npy_intp rank = 0; rank < k; rank++) {
-        npy_intp best = -1;
-        float best_value = -3.402823466e+38F;
-        for (npy_intp i = 0; i < n; i++) {
-            if (used[i]) {
-                continue;
-            }
-            float value = *(float *)PyArray_GETPTR1(scores, i);
-            if (best < 0 || value > best_value || (value == best_value && i > best)) {
-                best = i;
-                best_value = value;
-            }
+    npy_intp heap_size = 0;
+    const float *score_data = (const float *)PyArray_DATA(scores);
+    for (npy_intp i = 0; i < n; i++) {
+        TopKItem item = {i, score_data[i]};
+        if (heap_size < k) {
+            heap[heap_size] = item;
+            topk_heap_sift_up(heap, heap_size);
+            heap_size += 1;
+            continue;
         }
-        if (best < 0) {
-            best = 0;
-            best_value = 0.0f;
+        if (k > 0 && topk_is_better(&item, &heap[0])) {
+            heap[0] = item;
+            topk_heap_sift_down(heap, heap_size);
         }
-        used[best] = 1;
-        PyList_SET_ITEM(indices, rank, PyLong_FromSsize_t(best));
-        PyList_SET_ITEM(values, rank, PyFloat_FromDouble((double)best_value));
     }
-    PyMem_Free(used);
+    qsort(heap, (size_t)heap_size, sizeof(TopKItem), compare_topk_descending);
+    for (npy_intp rank = 0; rank < heap_size; rank++) {
+        PyList_SET_ITEM(indices, rank, PyLong_FromSsize_t(heap[rank].index));
+        PyList_SET_ITEM(values, rank, PyFloat_FromDouble((double)heap[rank].value));
+    }
+    PyMem_Free(heap);
     Py_DECREF(scores);
     PyObject *result = Py_BuildValue("{s:s,s:O,s:O,s:n}", "mode", "native_topk_float32", "indices", indices, "scores", values, "ops", n * k);
     Py_DECREF(indices);
@@ -993,6 +1417,7 @@ static PyMethodDef SparseMethods[] = {
     {"best_signature_match", best_signature_match, METH_VARARGS, "Score sparse candidate signatures against an active query."},
     {"simple_tokenize", simple_tokenize, METH_VARARGS, "Tokenize text into lowercase word and punctuation tokens."},
     {"dendrite_predict", dendrite_predict, METH_VARARGS, "Score dendritic branches and return the winning output."},
+    {"dendrite_predict_candidates", dendrite_predict_candidates, METH_VARARGS, "Score only candidate dendritic branches and return the winning output."},
     {"topk_float32", topk_float32, METH_VARARGS, "Return top-k float32 indices without allocating argsort output."},
     {NULL, NULL, 0, NULL}
 };

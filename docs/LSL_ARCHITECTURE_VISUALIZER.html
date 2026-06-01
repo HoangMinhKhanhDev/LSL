@@ -1,0 +1,3550 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LSL Architecture Interactive Visualizer</title>
+  <!-- Google Fonts: Inter & Fira Code -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  
+  <style>
+    :root {
+      /* Palette */
+      --bg-base: hsl(222, 28%, 7%);
+      --bg-surface: hsl(222, 24%, 11%);
+      --bg-surface-elevated: hsl(222, 20%, 15%);
+      --border-color: hsl(222, 16%, 20%);
+      --border-hover: hsl(222, 16%, 30%);
+      
+      --text-primary: hsl(210, 38%, 95%);
+      --text-secondary: hsl(210, 20%, 75%);
+      --text-muted: hsl(210, 12%, 50%);
+      
+      /* Theme accents */
+      --accent-cyan: hsl(182, 85%, 50%);
+      --accent-cyan-glow: hsla(182, 85%, 50%, 0.15);
+      --accent-green: hsl(142, 70%, 50%);
+      --accent-green-glow: hsla(142, 70%, 50%, 0.15);
+      --accent-purple: hsl(265, 80%, 65%);
+      --accent-purple-glow: hsla(265, 80%, 65%, 0.15);
+      --accent-orange: hsl(30, 90%, 55%);
+      --accent-orange-glow: hsla(30, 90%, 55%, 0.15);
+      --accent-pink: hsl(330, 85%, 60%);
+      --accent-pink-glow: hsla(330, 85%, 60%, 0.15);
+      
+      /* Global styles */
+      --radius-sm: 4px;
+      --radius-md: 8px;
+      --radius-lg: 12px;
+      --transition-normal: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      --transition-fast: all 0.15s ease;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-base);
+      color: var(--text-primary);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      height: 100vh;
+      overflow: hidden;
+      display: grid;
+      grid-template-rows: 64px 1fr;
+    }
+
+    /* Scrollbars */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: var(--bg-base);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--border-color);
+      border-radius: var(--radius-sm);
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--text-muted);
+    }
+
+    /* Header */
+    header {
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 28px;
+      z-index: 10;
+    }
+
+    .logo-container {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo-icon {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+      border-radius: 50%;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 16px rgba(0, 255, 255, 0.2);
+    }
+
+    .logo-icon::before {
+      content: '';
+      width: 14px;
+      height: 14px;
+      background: var(--bg-base);
+      border-radius: 50%;
+    }
+
+    .logo-title {
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      background: linear-gradient(to right, #fff, var(--text-secondary));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .logo-subtitle {
+      font-size: 11px;
+      color: var(--accent-cyan);
+      font-weight: 600;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      margin-left: 8px;
+      border: 1px solid hsla(182, 85%, 50%, 0.2);
+      padding: 2px 6px;
+      border-radius: var(--radius-sm);
+      background: hsla(182, 85%, 50%, 0.05);
+    }
+
+    nav {
+      display: flex;
+      gap: 4px;
+      height: 100%;
+    }
+
+    .nav-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      font-size: 14px;
+      font-weight: 500;
+      padding: 0 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      height: 100%;
+      position: relative;
+      transition: var(--transition-fast);
+    }
+
+    .nav-btn:hover {
+      color: var(--text-primary);
+    }
+
+    .nav-btn.active {
+      color: var(--accent-cyan);
+      font-weight: 600;
+    }
+
+    .nav-btn.active::after {
+      content: '';
+      position: absolute;
+      bottom: -1px;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: var(--accent-cyan);
+      box-shadow: 0 0 10px var(--accent-cyan);
+    }
+
+    /* Main Container Layout */
+    .app-container {
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    .main-viewport {
+      padding: 24px;
+      overflow-y: auto;
+      position: relative;
+      background: radial-gradient(circle at 10% 20%, hsla(222, 28%, 10%, 0.5) 0%, var(--bg-base) 90%);
+    }
+
+    .inspector-panel {
+      background: var(--bg-surface);
+      border-left: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      overflow-y: auto;
+    }
+
+    /* Tabs Content Visibility */
+    .tab-content {
+      display: none;
+      animation: fadeIn 0.4s ease-out;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* Interactive Dashboard View Elements */
+    .controls-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      padding: 12px 18px;
+      border-radius: var(--radius-lg);
+      backdrop-filter: blur(10px);
+    }
+
+    .profile-selector {
+      display: flex;
+      gap: 8px;
+    }
+
+    .profile-btn {
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-color);
+      color: var(--text-secondary);
+      padding: 8px 16px;
+      border-radius: var(--radius-md);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: var(--transition-normal);
+    }
+
+    .profile-btn:hover {
+      border-color: var(--text-muted);
+      color: var(--text-primary);
+    }
+
+    .profile-btn.active {
+      background: hsla(182, 85%, 50%, 0.08);
+      border-color: var(--accent-cyan);
+      color: var(--accent-cyan);
+      box-shadow: 0 0 12px rgba(0, 255, 255, 0.1);
+    }
+
+    .profile-info {
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .profile-info span {
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    /* System Map View */
+    .map-wrapper {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+      position: relative;
+      overflow: hidden;
+      min-height: 580px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .map-grid-bg {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-image: 
+        linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+      background-size: 24px 24px;
+      pointer-events: none;
+    }
+
+    /* SVG Diagram Styling */
+    svg.architecture-map {
+      width: 100%;
+      height: auto;
+      max-height: 560px;
+      display: block;
+    }
+
+    .svg-node {
+      cursor: pointer;
+      transition: var(--transition-normal);
+    }
+
+    .svg-node rect {
+      fill: hsl(222, 20%, 15%);
+      stroke: var(--border-color);
+      stroke-width: 1.5;
+      rx: 6;
+      ry: 6;
+      transition: var(--transition-normal);
+    }
+
+    .svg-node text {
+      font-family: 'Inter', sans-serif;
+      fill: var(--text-primary);
+      pointer-events: none;
+      font-size: 11px;
+      font-weight: 500;
+      text-anchor: middle;
+      user-select: none;
+    }
+
+    .svg-node .node-title {
+      font-weight: 700;
+      font-size: 12px;
+    }
+
+    .svg-node .node-subtitle {
+      fill: var(--text-secondary);
+      font-size: 10px;
+    }
+
+    .svg-node:hover rect {
+      stroke: var(--accent-cyan);
+      fill: hsl(222, 20%, 19%);
+      filter: drop-shadow(0 0 8px var(--accent-cyan-glow));
+    }
+
+    /* SVG Layer Boundary boxes */
+    .svg-boundary {
+      fill: hsla(222, 20%, 10%, 0.3);
+      stroke: var(--border-color);
+      stroke-width: 1;
+      stroke-dasharray: 4 4;
+      rx: 8;
+      ry: 8;
+    }
+
+    .svg-boundary-label {
+      font-family: 'Inter', sans-serif;
+      font-size: 10px;
+      font-weight: 700;
+      fill: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    .svg-connector {
+      fill: none;
+      stroke: var(--border-color);
+      stroke-width: 1.5;
+      marker-end: url(#arrow);
+      transition: var(--transition-normal);
+    }
+
+    .svg-connector.active {
+      stroke: var(--accent-cyan);
+      stroke-dasharray: 5 3;
+      animation: dashmove 2s linear infinite;
+    }
+
+    @keyframes dashmove {
+      to {
+        stroke-dashoffset: -20;
+      }
+    }
+
+    /* Specific node styling overrides based on layer */
+    .node-unified rect { stroke: var(--accent-orange); }
+    .node-unified:hover rect { stroke: var(--accent-orange); filter: drop-shadow(0 0 10px var(--accent-orange-glow)); }
+
+    .node-bio rect { stroke: var(--accent-green); }
+    .node-bio:hover rect { stroke: var(--accent-green); filter: drop-shadow(0 0 10px var(--accent-green-glow)); }
+
+    .node-memory rect { stroke: var(--accent-purple); }
+    .node-memory:hover rect { stroke: var(--accent-purple); filter: drop-shadow(0 0 10px var(--accent-purple-glow)); }
+
+    .node-reason rect { stroke: var(--accent-pink); }
+    .node-reason:hover rect { stroke: var(--accent-pink); filter: drop-shadow(0 0 10px var(--accent-pink-glow)); }
+
+    .node-synapse rect { stroke: var(--accent-cyan); }
+    .node-synapse:hover rect { stroke: var(--accent-cyan); filter: drop-shadow(0 0 10px var(--accent-cyan-glow)); }
+
+    /* Node dimming states when profile is applied */
+    .svg-node.dimmed {
+      opacity: 0.15;
+      filter: grayscale(80%) blur(0.5px);
+    }
+    .svg-connector.dimmed {
+      opacity: 0.15;
+    }
+
+    /* Inspector Styling */
+    .inspector-header {
+      padding: 20px;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .inspector-header h3 {
+      font-size: 15px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-secondary);
+    }
+
+    .inspector-badge {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      padding: 3px 8px;
+      border-radius: var(--radius-sm);
+    }
+
+    .inspector-body {
+      padding: 24px;
+      flex-grow: 1;
+    }
+
+    .inspector-placeholder {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      color: var(--text-muted);
+      padding: 40px;
+    }
+
+    .inspector-placeholder svg {
+      width: 48px;
+      height: 48px;
+      stroke: var(--border-color);
+      margin-bottom: 16px;
+    }
+
+    .inspect-class-title {
+      font-size: 22px;
+      font-weight: 800;
+      margin-bottom: 4px;
+      color: #fff;
+    }
+
+    .inspect-file-path {
+      font-family: 'Fira Code', monospace;
+      font-size: 12px;
+      color: var(--accent-cyan);
+      margin-bottom: 20px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .inspect-section-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-top: 24px;
+      margin-bottom: 10px;
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 6px;
+    }
+
+    .inspect-desc {
+      font-size: 14px;
+      line-height: 1.6;
+      color: var(--text-secondary);
+    }
+
+    .relationship-list {
+      list-style-type: none;
+    }
+
+    .relationship-list li {
+      position: relative;
+      padding-left: 16px;
+      margin-bottom: 8px;
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+
+    .relationship-list li::before {
+      content: '↳';
+      position: absolute;
+      left: 0;
+      color: var(--accent-cyan);
+    }
+
+    .metric-gauge-mini {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--bg-surface-elevated);
+      padding: 10px 14px;
+      border-radius: var(--radius-md);
+      margin-bottom: 8px;
+      border: 1px solid var(--border-color);
+    }
+
+    .metric-gauge-label {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-secondary);
+    }
+
+    .metric-gauge-val {
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--accent-green);
+      font-family: 'Fira Code', monospace;
+    }
+
+    .inspector-actions {
+      padding: 20px;
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      gap: 8px;
+    }
+
+    .inspect-btn {
+      flex: 1;
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-color);
+      color: var(--text-primary);
+      padding: 10px;
+      border-radius: var(--radius-md);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: center;
+      transition: var(--transition-fast);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+
+    .inspect-btn:hover {
+      background: var(--border-color);
+      border-color: var(--text-muted);
+    }
+
+    .inspect-btn-primary {
+      background: var(--accent-cyan);
+      color: var(--bg-base);
+      border: none;
+    }
+
+    .inspect-btn-primary:hover {
+      background: hsl(182, 85%, 43%);
+      box-shadow: 0 0 12px rgba(0, 255, 255, 0.2);
+    }
+
+    /* Class Explorer Styling */
+    .explorer-filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 24px;
+      background: var(--bg-surface);
+      padding: 12px;
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border-color);
+    }
+
+    .filter-search {
+      flex-grow: 1;
+      min-width: 200px;
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-color);
+      color: #fff;
+      padding: 8px 14px;
+      border-radius: var(--radius-md);
+      font-size: 13px;
+      outline: none;
+      transition: var(--transition-fast);
+    }
+
+    .filter-search:focus {
+      border-color: var(--accent-cyan);
+      box-shadow: 0 0 8px var(--accent-cyan-glow);
+    }
+
+    .layer-tag {
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-color);
+      color: var(--text-secondary);
+      padding: 6px 12px;
+      border-radius: var(--radius-md);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: var(--transition-fast);
+    }
+
+    .layer-tag:hover {
+      border-color: var(--text-muted);
+      color: var(--text-primary);
+    }
+
+    .layer-tag.active {
+      background: var(--accent-cyan-glow);
+      border-color: var(--accent-cyan);
+      color: var(--accent-cyan);
+    }
+
+    .layer-tag.unified.active { background: var(--accent-orange-glow); border-color: var(--accent-orange); color: var(--accent-orange); }
+    .layer-tag.bio.active { background: var(--accent-green-glow); border-color: var(--accent-green); color: var(--accent-green); }
+    .layer-tag.memory.active { background: var(--accent-purple-glow); border-color: var(--accent-purple); color: var(--accent-purple); }
+    .layer-tag.reason.active { background: var(--accent-pink-glow); border-color: var(--accent-pink); color: var(--accent-pink); }
+
+    .classes-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 20px;
+    }
+
+    .class-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 20px;
+      transition: var(--transition-normal);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .class-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 4px;
+      height: 100%;
+      background: var(--border-color);
+      transition: var(--transition-normal);
+    }
+
+    .class-card.unified::before { background: var(--accent-orange); }
+    .class-card.bio::before { background: var(--accent-green); }
+    .class-card.memory::before { background: var(--accent-purple); }
+    .class-card.reason::before { background: var(--accent-pink); }
+    .class-card.synapse::before { background: var(--accent-cyan); }
+
+    .class-card:hover {
+      transform: translateY(-2px);
+      border-color: var(--border-hover);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+    }
+
+    .class-card-header {
+      margin-bottom: 12px;
+    }
+
+    .class-card-layer {
+      font-size: 10px;
+      text-transform: uppercase;
+      font-weight: 700;
+      letter-spacing: 1px;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+      display: inline-block;
+    }
+
+    .class-card-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .class-card-file {
+      font-family: 'Fira Code', monospace;
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .class-card-body {
+      font-size: 13px;
+      line-height: 1.5;
+      color: var(--text-secondary);
+      margin-bottom: 16px;
+      flex-grow: 1;
+    }
+
+    .class-card-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .card-btn {
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-color);
+      color: var(--text-secondary);
+      padding: 6px 12px;
+      border-radius: var(--radius-md);
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: var(--transition-fast);
+    }
+
+    .card-btn:hover {
+      border-color: var(--text-muted);
+      color: var(--text-primary);
+    }
+
+    .card-btn.primary {
+      background: var(--accent-cyan-glow);
+      border-color: var(--accent-cyan);
+      color: var(--accent-cyan);
+    }
+
+    .card-btn.primary:hover {
+      background: var(--accent-cyan);
+      color: var(--bg-base);
+    }
+
+    /* Python Code block syntax styling */
+    pre.code-block {
+      background: hsl(222, 28%, 5%);
+      border: 1px solid var(--border-color);
+      padding: 16px;
+      border-radius: var(--radius-md);
+      overflow-x: auto;
+      font-family: 'Fira Code', monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      color: var(--text-secondary);
+    }
+
+    .keyword { color: hsl(330, 80%, 65%); font-weight: 500; }
+    .builtin { color: hsl(265, 80%, 70%); }
+    .defname { color: hsl(182, 85%, 45%); font-weight: 500; }
+    .string { color: hsl(95, 60%, 55%); }
+    .comment { color: var(--text-muted); font-style: italic; }
+    .typename { color: hsl(35, 85%, 60%); }
+
+    /* Data Flow Simulator View */
+    .sim-container {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 20px;
+      height: calc(100vh - 160px);
+      overflow: hidden;
+    }
+
+    @media (max-width: 1200px) {
+      .sim-container {
+        grid-template-columns: 1fr;
+        grid-template-rows: 1fr auto;
+        height: auto;
+        overflow-y: auto;
+      }
+    }
+
+    .sim-map-panel {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+    }
+
+    .sim-controls {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--bg-surface-elevated);
+      padding: 10px 16px;
+      border-radius: var(--radius-md);
+      margin-bottom: 12px;
+    }
+
+    .sim-selector {
+      display: flex;
+      gap: 6px;
+    }
+
+    .sim-select-btn {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      color: var(--text-secondary);
+      padding: 6px 12px;
+      border-radius: var(--radius-md);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: var(--transition-fast);
+    }
+
+    .sim-select-btn.active {
+      background: var(--accent-cyan-glow);
+      border-color: var(--accent-cyan);
+      color: var(--accent-cyan);
+    }
+
+    .sim-playback {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .sim-play-btn {
+      background: var(--accent-cyan);
+      color: var(--bg-base);
+      border: none;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-weight: bold;
+    }
+
+    .sim-play-btn:hover {
+      transform: scale(1.05);
+    }
+
+    .sim-step-btn {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      color: var(--text-primary);
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+
+    .sim-step-btn:hover {
+      background: var(--bg-surface-elevated);
+    }
+
+    .sim-map-viewport {
+      flex-grow: 1;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      background: hsl(222, 28%, 5%);
+    }
+
+    .sim-flow-panel {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      overflow-y: auto;
+    }
+
+    .sim-flow-title {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border-color);
+      font-size: 15px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-secondary);
+    }
+
+    .sim-steps-timeline {
+      padding: 20px;
+      overflow-y: auto;
+      flex-grow: 1;
+    }
+
+    .sim-step-item {
+      position: relative;
+      padding-left: 28px;
+      padding-bottom: 20px;
+      border-left: 1px solid var(--border-color);
+      cursor: pointer;
+    }
+
+    .sim-step-item:last-child {
+      border-left: none;
+      padding-bottom: 0;
+    }
+
+    .sim-step-dot {
+      position: absolute;
+      left: -5px;
+      top: 2px;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--border-color);
+      border: 2px solid var(--bg-surface);
+      transition: var(--transition-normal);
+    }
+
+    .sim-step-item:hover .sim-step-dot {
+      background: var(--text-muted);
+      transform: scale(1.2);
+    }
+
+    .sim-step-item.active .sim-step-dot {
+      background: var(--accent-cyan);
+      box-shadow: 0 0 8px var(--accent-cyan);
+      transform: scale(1.3);
+    }
+
+    .sim-step-item.active {
+      border-left-color: var(--accent-cyan);
+    }
+
+    .sim-step-num {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 2px;
+    }
+
+    .sim-step-item.active .sim-step-num {
+      color: var(--accent-cyan);
+    }
+
+    .sim-step-name {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+    }
+
+    .sim-step-item.active .sim-step-name {
+      color: #fff;
+    }
+
+    .sim-step-desc {
+      font-size: 12px;
+      line-height: 1.5;
+      color: var(--text-muted);
+      display: none;
+    }
+
+    .sim-step-item.active .sim-step-desc {
+      display: block;
+      color: var(--text-secondary);
+      animation: fadeIn 0.3s ease-out;
+    }
+
+    /* Memory and Bio View Layout */
+    .mem-bio-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+
+    @media (max-width: 992px) {
+      .mem-bio-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .panel-section {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 24px;
+    }
+
+    .panel-section-title {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .panel-section-subtitle {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-bottom: 24px;
+      line-height: 1.5;
+    }
+
+    /* Memory Hierarchy Stack Graphic */
+    .mem-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .mem-tier {
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      padding: 16px;
+      background: var(--bg-surface-elevated);
+      position: relative;
+      cursor: pointer;
+      transition: var(--transition-normal);
+    }
+
+    .mem-tier::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      height: 100%;
+      width: 4px;
+      border-radius: var(--radius-md) 0 0 var(--radius-md);
+    }
+
+    .mem-tier-working::after { background: var(--accent-orange); }
+    .mem-tier-episodic::after { background: var(--accent-green); }
+    .mem-tier-semantic::after { background: var(--accent-purple); }
+    .mem-tier-consolidated::after { background: var(--accent-cyan); }
+
+    .mem-tier:hover {
+      transform: scale(1.01);
+      border-color: var(--border-hover);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+
+    .mem-tier-title {
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 6px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .mem-tier-working .mem-tier-title { color: var(--accent-orange); }
+    .mem-tier-episodic .mem-tier-title { color: var(--accent-green); }
+    .mem-tier-semantic .mem-tier-title { color: var(--accent-purple); }
+    .mem-tier-consolidated .mem-tier-title { color: var(--accent-cyan); }
+
+    .mem-tier-type {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+    }
+
+    .mem-tier-subs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .mem-sub-item {
+      background: var(--bg-base);
+      border: 1px solid var(--border-color);
+      font-size: 11px;
+      font-weight: 500;
+      padding: 4px 8px;
+      border-radius: var(--radius-sm);
+      color: var(--text-secondary);
+    }
+
+    /* Memory Consolidation Flow Visual */
+    .consolidation-flow {
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      padding: 16px;
+    }
+
+    .flow-step {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .flow-step:last-child {
+      margin-bottom: 0;
+    }
+
+    .flow-step-num {
+      width: 24px;
+      height: 24px;
+      background: var(--bg-base);
+      border: 1px solid var(--border-color);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--accent-cyan);
+    }
+
+    .flow-step-text {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.4;
+      flex-grow: 1;
+    }
+
+    /* Biological Mechanisms layout */
+    .bio-mechanisms-list {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+
+    .bio-mechanism-card {
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      padding: 16px;
+      display: grid;
+      grid-template-columns: 1fr 120px;
+      gap: 16px;
+      align-items: center;
+      transition: var(--transition-normal);
+    }
+
+    .bio-mechanism-card:hover {
+      border-color: var(--border-hover);
+    }
+
+    .bio-mech-info h4 {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 4px;
+      color: #fff;
+    }
+
+    .bio-mech-info p {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.5;
+      margin-bottom: 8px;
+    }
+
+    .bio-mech-props {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .bio-mech-prop {
+      font-size: 11px;
+      background: var(--bg-base);
+      border: 1px solid var(--border-color);
+      padding: 2px 6px;
+      border-radius: var(--radius-sm);
+      color: var(--text-muted);
+    }
+
+    /* Dynamic Target Meter */
+    .target-meter {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      border-left: 1px solid var(--border-color);
+      padding-left: 16px;
+    }
+
+    .target-gauge {
+      width: 60px;
+      height: 60px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .target-val {
+      font-family: 'Fira Code', monospace;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--accent-green);
+    }
+
+    .target-label {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-top: 6px;
+    }
+
+    /* Algorithm Studio Styling */
+    .algo-container {
+      display: grid;
+      grid-template-columns: 260px 1fr;
+      gap: 20px;
+      height: calc(100vh - 160px);
+    }
+
+    @media (max-width: 900px) {
+      .algo-container {
+        grid-template-columns: 1fr;
+        height: auto;
+      }
+    }
+
+    .algo-sidebar {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      padding: 16px;
+      overflow-y: auto;
+    }
+
+    .algo-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .algo-list-btn {
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--text-secondary);
+      padding: 10px 14px;
+      border-radius: var(--radius-md);
+      font-size: 13px;
+      font-weight: 500;
+      text-align: left;
+      cursor: pointer;
+      transition: var(--transition-fast);
+    }
+
+    .algo-list-btn:hover {
+      background: var(--bg-surface-elevated);
+      color: var(--text-primary);
+    }
+
+    .algo-list-btn.active {
+      background: var(--accent-cyan-glow);
+      border-color: var(--accent-cyan);
+      color: var(--accent-cyan);
+      font-weight: 600;
+    }
+
+    .algo-viewport {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      display: grid;
+      grid-template-rows: auto 1fr;
+      overflow: hidden;
+      height: 100%;
+    }
+
+    .algo-meta {
+      padding: 18px 24px;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .algo-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .algo-complexity {
+      font-family: 'Fira Code', monospace;
+      font-size: 12px;
+      color: var(--accent-orange);
+      background: var(--accent-orange-glow);
+      padding: 3px 8px;
+      border-radius: var(--radius-sm);
+    }
+
+    .algo-editor-split {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      overflow: hidden;
+      height: 100%;
+    }
+
+    @media (max-width: 1200px) {
+      .algo-editor-split {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto auto;
+        overflow-y: auto;
+      }
+    }
+
+    .algo-code-side {
+      padding: 20px;
+      overflow-y: auto;
+      border-right: 1px solid var(--border-color);
+    }
+
+    .algo-explain-side {
+      padding: 24px;
+      overflow-y: auto;
+      background: hsl(222, 28%, 9%);
+    }
+
+    .algo-explain-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-bottom: 12px;
+    }
+
+    .algo-explain-text {
+      font-size: 14px;
+      line-height: 1.6;
+      color: var(--text-secondary);
+      margin-bottom: 20px;
+    }
+
+    .algo-step-list {
+      list-style-type: none;
+    }
+
+    .algo-step-list li {
+      position: relative;
+      padding-left: 24px;
+      margin-bottom: 12px;
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+
+    .algo-step-list li::before {
+      content: attr(data-step);
+      position: absolute;
+      left: 0;
+      top: 1px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--bg-surface-elevated);
+      border: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--accent-cyan);
+    }
+
+    /* Modal styling */
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0,0,0,0.8);
+      backdrop-filter: blur(4px);
+      z-index: 100;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .modal-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      width: 100%;
+      max-width: 800px;
+      max-height: 90vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      box-shadow: 0 24px 48px rgba(0,0,0,0.4);
+    }
+
+    .modal-header {
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .modal-body {
+      padding: 24px;
+      overflow-y: auto;
+    }
+
+    .modal-close {
+      background: transparent;
+      border: none;
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-size: 20px;
+    }
+
+    .modal-close:hover {
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Navigation Header -->
+  <header>
+    <div class="logo-container">
+      <div class="logo-icon"></div>
+      <span class="logo-title">LSL Core Model</span>
+      <span class="logo-subtitle">Architecture Explorer</span>
+    </div>
+    <nav>
+      <button class="nav-btn active" onclick="switchTab('dashboard')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
+        Sơ đồ Hệ thống
+      </button>
+      <button class="nav-btn" onclick="switchTab('simulator')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+        Luồng Dữ liệu
+      </button>
+      <button class="nav-btn" onclick="switchTab('classes')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+        Thành phần (Classes)
+      </button>
+      <button class="nav-btn" onclick="switchTab('membio')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"></path></svg>
+        Memory & Bio targets
+      </button>
+      <button class="nav-btn" onclick="switchTab('algorithms')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+        Thuật toán
+      </button>
+    </nav>
+  </header>
+
+  <!-- App Layout Container -->
+  <div class="app-container">
+    
+    <!-- Left Main Content Viewport -->
+    <main class="main-viewport">
+      
+      <!-- TAB 1: SƠ ĐỒ HỆ THỐNG (DASHBOARD) -->
+      <div id="tab-dashboard" class="tab-content active">
+        <div class="controls-bar">
+          <div class="profile-selector">
+            <button class="profile-btn active" onclick="applyProfile('all')">Mặc định (All)</button>
+            <button class="profile-btn" onclick="applyProfile('full')">Full Profile</button>
+            <button class="profile-btn" onclick="applyProfile('native_fast')">Native Fast</button>
+            <button class="profile-btn" onclick="applyProfile('bio_native')">Bio Native</button>
+          </div>
+          <div class="profile-info" id="profile-info-text">
+            Profile hiện tại: <span>Tất cả các thành phần</span> (Nhấn để lọc sơ đồ)
+          </div>
+        </div>
+
+        <div class="map-wrapper">
+          <div class="map-grid-bg"></div>
+          
+          <!-- SYSTEM INTERACTIVE MAP SVG -->
+          <svg class="architecture-map" viewBox="0 0 1000 600" width="100%" height="100%">
+            <defs>
+              <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="var(--border-color)" />
+              </marker>
+              <marker id="arrow-cyan" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="var(--accent-cyan)" />
+              </marker>
+            </defs>
+
+            <!-- LAYER BOUNDARIES -->
+            <!-- Unified Entry Point Layer Boundary -->
+            <rect class="svg-boundary" x="20" y="20" width="960" height="90" />
+            <text class="svg-boundary-label" x="35" y="40">Layer 1: Unified Facade / Agent Entry Point</text>
+
+            <!-- Bio Compute Agent Layer Boundary -->
+            <rect class="svg-boundary" x="20" y="130" width="960" height="150" />
+            <text class="svg-boundary-label" x="35" y="150">Layer 2: Biological Compute Agent (6 Mechanisms)</text>
+
+            <!-- Shared SDR Bus Layer Boundary -->
+            <rect class="svg-boundary" x="20" y="300" width="960" height="50" />
+            <text class="svg-boundary-label" x="35" y="320">Shared State: Sparse SDR Bus</text>
+
+            <!-- Subsystems Layer Boundary -->
+            <rect class="svg-boundary" x="20" y="370" width="960" height="130" />
+            <text class="svg-boundary-label" x="35" y="390">Layer 3: Bounded Subsystems (Memory, Reasoning, Generation)</text>
+
+            <!-- Synapse Acceleration Layer Boundary -->
+            <rect class="svg-boundary" x="20" y="520" width="960" height="65" />
+            <text class="svg-boundary-label" x="35" y="540">Layer 4: Synaptic Acceleration (C Kernel)</text>
+
+            <!-- CONNECTORS (Static Paths) -->
+            <!-- Facade to Agent -->
+            <path class="svg-connector connector-flow" id="conn-core-agent" d="M 370,110 L 370,140" />
+            <path class="svg-connector connector-flow" id="conn-agent-bus" d="M 500,280 L 500,300" />
+            
+            <!-- Bus to Subsystems -->
+            <path class="svg-connector connector-flow" id="conn-bus-mem" d="M 230,350 L 230,380" />
+            <path class="svg-connector connector-flow" id="conn-bus-reason" d="M 500,350 L 500,380" />
+            <path class="svg-connector connector-flow" id="conn-bus-gen" d="M 770,350 L 770,380" />
+
+            <!-- Core to Synapse -->
+            <path class="svg-connector connector-flow" id="conn-core-synapse" d="M 850,110 L 850,520" />
+            
+            <!-- NODES -->
+            
+            <!-- LAYER 1: UNIFIED FACADE -->
+            <g class="svg-node node-unified" id="node-lsl_core_model" onclick="inspectNode('lsl_core_model')">
+              <rect x="50" y="50" width="480" height="50" />
+              <text class="node-title" x="290" y="74">LSLCoreModel (lsl/core.py)</text>
+              <text class="node-subtitle" x="290" y="88">Unified entry point: train_stream(), generate(), answer(), save/load()</text>
+            </g>
+
+            <g class="svg-node node-unified" id="node-integrated_lsl_agent" onclick="inspectNode('integrated_lsl_agent')">
+              <rect x="550" y="50" width="400" height="50" />
+              <text class="node-title" x="750" y="74">IntegratedLSLAgent (lsl/agent.py)</text>
+              <text class="node-subtitle" x="750" y="88">Strict execution paths for QA, math traces, events</text>
+            </g>
+
+            <!-- LAYER 2: BIO COMPUTE AGENT (6 MECHANISMS) -->
+            <g class="svg-node node-bio" id="node-bio_compute_agent" onclick="inspectNode('bio_compute_agent')">
+              <rect x="50" y="160" width="220" height="100" />
+              <text class="node-title" x="160" y="200">BioComputeAgent</text>
+              <text class="node-subtitle" x="160" y="218">lsl/bio.py</text>
+              <text class="node-subtitle" x="160" y="234">Orchestrates 6 mechanisms</text>
+            </g>
+
+            <!-- 6 Biological modules -->
+            <g class="svg-node node-bio" id="node-local_predictive_stack" onclick="inspectNode('local_predictive_stack')">
+              <rect x="290" y="160" width="130" height="45" />
+              <text class="node-title" x="355" y="180">Predictive Coding v2</text>
+              <text class="node-subtitle" x="355" y="193">LocalPredictiveStack</text>
+            </g>
+
+            <g class="svg-node node-bio" id="node-virtual_sparse_sdr" onclick="inspectNode('virtual_sparse_sdr')">
+              <rect x="430" y="160" width="130" height="45" />
+              <text class="node-title" x="495" y="180">SDR v2 (Virtual)</text>
+              <text class="node-subtitle" x="495" y="193">VirtualSparseSDR</text>
+            </g>
+
+            <g class="svg-node node-bio" id="node-cortical_column_sequence_memory" onclick="inspectNode('cortical_column_sequence_memory')">
+              <rect x="570" y="160" width="130" height="45" />
+              <text class="node-title" x="635" y="180">Cortical Columns</text>
+              <text class="node-subtitle" x="635" y="193">Sequence Memory</text>
+            </g>
+
+            <g class="svg-node node-bio" id="node-hippocampal_memory" onclick="inspectNode('hippocampal_memory')">
+              <rect x="290" y="215" width="130" height="45" />
+              <text class="node-title" x="355" y="235">Hippocampus</text>
+              <text class="node-subtitle" x="355" y="248">Two-Speed Memory</text>
+            </g>
+
+            <g class="svg-node node-bio" id="node-bio_neuromodulator" onclick="inspectNode('bio_neuromodulator')">
+              <rect x="430" y="215" width="130" height="45" />
+              <text class="node-title" x="495" y="235">Neuromodulation</text>
+              <text class="node-subtitle" x="495" y="248">BioNeuromodulator</text>
+            </g>
+
+            <g class="svg-node node-bio" id="node-dendritic_layer" onclick="inspectNode('dendritic_layer')">
+              <rect x="570" y="215" width="130" height="45" />
+              <text class="node-title" x="635" y="235">Dendrites (XOR)</text>
+              <text class="node-subtitle" x="635" y="248">DendriticLayer</text>
+            </g>
+
+            <g class="svg-node node-bio" id="node-homeostatic_controller" onclick="inspectNode('homeostatic_controller')">
+              <rect x="720" y="160" width="220" height="100" />
+              <text class="node-title" x="830" y="200">Homeostatic Controller</text>
+              <text class="node-subtitle" x="830" y="218">lsl/homeostasis.py</text>
+              <text class="node-subtitle" x="830" y="234">Sparsity & Error Self-Tuning</text>
+            </g>
+
+            <!-- SHARED STATE BUS -->
+            <g class="svg-node node-synapse" id="node-sparse_sdr_bus" onclick="inspectNode('sparse_sdr_bus')">
+              <rect x="50" y="310" width="890" height="30" />
+              <text class="node-title" x="495" y="329">SPARSE SDR BUS (Shared State: Active Indices | Local State | Co-occurrence Structures)</text>
+            </g>
+
+            <!-- LAYER 3: SUBSYSTEMS -->
+            <!-- Memory systems -->
+            <g class="svg-node node-memory" id="node-long_context_memory" onclick="inspectNode('long_context_memory')">
+              <rect x="50" y="390" width="280" height="40" />
+              <text class="node-title" x="190" y="415">Long Context Memory (Transitions)</text>
+            </g>
+            <g class="svg-node node-memory" id="node-world_memory" onclick="inspectNode('world_memory')">
+              <rect x="50" y="440" width="135" height="40" />
+              <text class="node-title" x="117.5" y="465">WorldMemory</text>
+            </g>
+            <g class="svg-node node-memory" id="node-sparse_key_value_memory" onclick="inspectNode('sparse_key_value_memory')">
+              <rect x="195" y="440" width="135" height="40" />
+              <text class="node-title" x="262.5" y="465">SparseKeyValue</text>
+            </g>
+
+            <!-- Reasoning Systems -->
+            <g class="svg-node node-reason" id="node-entity_event_graph" onclick="inspectNode('entity_event_graph')">
+              <rect x="370" y="390" width="125" height="40" />
+              <text class="node-title" x="432.5" y="415">EntityEventGraph</text>
+            </g>
+            <g class="svg-node node-reason" id="node-reasoning_workspace" onclick="inspectNode('reasoning_workspace')">
+              <rect x="505" y="390" width="125" height="40" />
+              <text class="node-title" x="567.5" y="415">ReasoningWorkspace</text>
+            </g>
+            <g class="svg-node node-reason" id="node-relation_memory" onclick="inspectNode('relation_memory')">
+              <rect x="370" y="440" width="125" height="40" />
+              <text class="node-title" x="432.5" y="465">RelationMemory</text>
+            </g>
+            <g class="svg-node node-reason" id="node-role_binding_memory" onclick="inspectNode('role_binding_memory')">
+              <rect x="505" y="440" width="125" height="40" />
+              <text class="node-title" x="567.5" y="465">RoleBindingMemory</text>
+            </g>
+
+            <!-- Generation System -->
+            <g class="svg-node node-unified" id="node-generation_controller" onclick="inspectNode('generation_controller')">
+              <rect x="670" y="390" width="270" height="90" />
+              <text class="node-title" x="805" y="420">GenerationController (lsl/generation.py)</text>
+              <text class="node-subtitle" x="805" y="440">DiscourseState & DiscoursePlan</text>
+              <text class="node-subtitle" x="805" y="456">Scoring, loop protection, coherence selection</text>
+            </g>
+
+            <!-- LAYER 4: ACCELERATION & SYNAPSE -->
+            <g class="svg-node node-synapse" id="node-living_synapse_layer" onclick="inspectNode('living_synapse_layer')">
+              <rect x="50" y="530" width="580" height="45" />
+              <text class="node-title" x="340" y="558">LivingSynapseLayer (W_slow, W_live, fatigue - lsl/synapse.py)</text>
+            </g>
+
+            <g class="svg-node node-synapse" id="node-semantic_sdr_encoder" onclick="inspectNode('semantic_sdr_encoder')">
+              <rect x="650" y="530" width="290" height="45" />
+              <text class="node-title" x="795" y="558">SemanticSDREncoder (lsl/semantic_sdr.py)</text>
+            </g>
+            
+          </svg>
+        </div>
+      </div>
+
+      <!-- TAB 2: LUỒNG DỮ LIỆU (SIMULATOR) -->
+      <div id="tab-simulator" class="tab-content">
+        <div class="sim-container">
+          
+          <!-- Simulator diagram viewport -->
+          <div class="sim-map-panel">
+            <div class="sim-controls">
+              <div class="sim-selector">
+                <button class="sim-select-btn active" onclick="loadFlow('train')">Luồng Training (Observe)</button>
+                <button class="sim-select-btn" onclick="loadFlow('generate')">Luồng Generation</button>
+                <button class="sim-select-btn" onclick="loadFlow('qa')">Luồng QA Answer</button>
+              </div>
+              <div class="sim-playback">
+                <button class="sim-step-btn" onclick="simPrevStep()">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="19 20 9 12 19 4 19 20"></polygon><line x1="5" y1="19" x2="5" y2="5"></line></svg>
+                </button>
+                <button class="sim-play-btn" id="sim-play-trigger" onclick="toggleSimPlay()">▶</button>
+                <button class="sim-step-btn" onclick="simNextStep()">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 4 15 12 5 20 5 4"></polygon><line x1="19" y1="5" x2="19" y2="19"></line></svg>
+                </button>
+              </div>
+            </div>
+            
+            <div class="sim-map-viewport" id="sim-svg-container">
+              <!-- Inline mini system SVG for simulation visualization -->
+            </div>
+          </div>
+          
+          <!-- Timeline side panel -->
+          <div class="sim-flow-panel">
+            <div class="sim-flow-title" id="sim-flow-title-text">Cơ Chế Training Flow</div>
+            <div class="sim-steps-timeline" id="sim-timeline">
+              <!-- Timeline items populated dynamically by JS -->
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- TAB 3: THÀNH PHẦN (CLASSES) -->
+      <div id="tab-classes" class="tab-content">
+        <div class="explorer-filters">
+          <input type="text" class="filter-search" id="class-search-input" placeholder="Tìm kiếm lớp (Ví dụ: Hippocampus, SDR...)..." oninput="filterClasses()">
+          <button class="layer-tag active" data-layer="all" onclick="filterLayer('all')">Tất cả layers</button>
+          <button class="layer-tag unified" data-layer="unified" onclick="filterLayer('unified')">Facade/Agent</button>
+          <button class="layer-tag bio" data-layer="bio" onclick="filterLayer('bio')">Bio Compute</button>
+          <button class="layer-tag memory" data-layer="memory" onclick="filterLayer('memory')">Memory Systems</button>
+          <button class="layer-tag reason" data-layer="reason" onclick="filterLayer('reason')">Reasoning</button>
+          <button class="layer-tag synapse" data-layer="synapse" onclick="filterLayer('synapse')">Synapse & SDR</button>
+        </div>
+        
+        <div class="classes-grid" id="classes-container">
+          <!-- Class cards loaded dynamically by JS -->
+        </div>
+      </div>
+
+      <!-- TAB 4: MEMORY & BIO TARGETS -->
+      <div id="tab-membio" class="tab-content">
+        <div class="mem-bio-grid">
+          
+          <!-- Memory Hierarchy Section -->
+          <div class="panel-section">
+            <div class="panel-section-title">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3"></path></svg>
+              Hệ Thống Phân Cấp Bộ Nhớ (Memory Hierarchy)
+            </div>
+            <div class="panel-section-subtitle">
+              Sắp xếp bộ nhớ LSL từ lưu trữ tạm thời nhanh đến củng cố dài hạn chậm.
+            </div>
+            
+            <div class="mem-stack">
+              <div class="mem-tier mem-tier-working" onclick="highlightMemoryTier('working')">
+                <div class="mem-tier-title">
+                  WORKING MEMORY
+                  <span class="mem-tier-type">Bộ nhớ đệm / Siêu ngắn hạn</span>
+                </div>
+                <div class="mem-tier-desc">Dành cho việc lưu trữ các bước suy luận, các biến binding và các trạng thái execution cục bộ.</div>
+                <div class="mem-tier-subs">
+                  <span class="mem-sub-item">workspace.variables</span>
+                  <span class="mem-sub-item">workspace.bindings</span>
+                  <span class="mem-sub-item">workspace.steps</span>
+                </div>
+              </div>
+
+              <div class="mem-tier mem-tier-episodic" onclick="highlightMemoryTier('episodic')">
+                <div class="mem-tier-title">
+                  EPISODIC MEMORY (Fast)
+                  <span class="mem-tier-type">Ký ức sự kiện / Ngắn hạn</span>
+                </div>
+                <div class="mem-tier-desc">Ghi nhận các chuỗi quan sát mới xảy ra có độ bất ngờ (surprise) cao nhằm chuẩn bị củng cố.</div>
+                <div class="mem-tier-subs">
+                  <span class="mem-sub-item">hippocampus.fast_memory</span>
+                  <span class="mem-sub-item">EpisodicBuffer</span>
+                  <span class="mem-sub-item">Recent Transitions</span>
+                </div>
+              </div>
+
+              <div class="mem-tier mem-tier-semantic" onclick="highlightMemoryTier('semantic')">
+                <div class="mem-tier-title">
+                  SEMANTIC MEMORY (Slow)
+                  <span class="mem-tier-type">Ký ức ngữ nghĩa / Trung hạn</span>
+                </div>
+                <div class="mem-tier-desc">Lưu trữ các mối quan hệ có cấu trúc, các sự kiện thực tế, và ngữ cảnh dài hạn thu thập được.</div>
+                <div class="mem-tier-subs">
+                  <span class="mem-sub-item">hippocampus.slow_memory</span>
+                  <span class="mem-sub-item">LongContextMemory</span>
+                  <span class="mem-sub-item">WorldMemory</span>
+                  <span class="mem-sub-item">RelationMemory</span>
+                  <span class="mem-sub-item">EntityEventGraph</span>
+                </div>
+              </div>
+
+              <div class="mem-tier mem-tier-consolidated" onclick="highlightMemoryTier('consolidated')">
+                <div class="mem-tier-title">
+                  CONSOLIDATED MEMORY
+                  <span class="mem-tier-type">Củng cố synapse / Dài hạn</span>
+                </div>
+                <div class="mem-tier-desc">Chuyển hóa tri thức vào các liên kết synapse ổn định (W_slow) thông qua chu trình Consolidation định kỳ.</div>
+                <div class="mem-tier-subs">
+                  <span class="mem-sub-item">W_slow (synapses)</span>
+                  <span class="mem-sub-item">Temporal Segments</span>
+                  <span class="mem-sub-item">HierarchicalMemory</span>
+                </div>
+              </div>
+            </div>
+            
+            <div class="consolidation-flow">
+              <div class="algo-explain-title">Quy trình củng cố bộ nhớ (Consolidation)</div>
+              <div class="flow-step">
+                <div class="flow-step-num">1</div>
+                <div class="flow-step-text"><strong>Nhận diện:</strong> Các trạng thái hoạt động tức thì trong Working Memory được lưu trữ vào bộ nhớ episodic nhanh (Hippocampus Fast).</div>
+              </div>
+              <div class="flow-step">
+                <div class="flow-step-num">2</div>
+                <div class="flow-step-text"><strong>Replay (Tái hiện):</strong> Định kỳ, bộ nhớ tái hiện lại các mẫu lưu trữ nhanh để huấn luyện bộ nhớ chậm (Hippocampus Slow).</div>
+              </div>
+              <div class="flow-step">
+                <div class="flow-step-num">3</div>
+                <div class="flow-step-text"><strong>Synapse transfer:</strong> Di chuyển các trọng số học nhanh (W_live) có giá trị cao sang các liên kết synapse dài hạn ổn định (W_slow).</div>
+              </div>
+            </div>
+          </div>
+          
+          <!-- Biological Mechanisms Section -->
+          <div class="panel-section">
+            <div class="panel-section-title">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4.5 16.5c-1.5 1.26-2.5 3.19-2.5 5.5h20c0-2.31-1-4.24-2.5-5.5"></path><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2z"></path><path d="M12 6a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"></path></svg>
+              Các Cơ Chế Sinh Học & Chỉ Tiêu Đạt Được
+            </div>
+            <div class="panel-section-subtitle">
+              Sáu cơ chế sinh học nền tảng tạo nên khả năng tính toán của LSL mà không cần lan truyền ngược (Backpropagation).
+            </div>
+            
+            <div class="bio-mechanisms-list">
+              <!-- PC v2 -->
+              <div class="bio-mechanism-card">
+                <div class="bio-mech-info">
+                  <h4>1. Predictive Coding v2</h4>
+                  <p>Học tập dựa trên lỗi cục bộ ở từng lớp. Dự đoán trạng thái tiếp theo và nén tín hiệu phản hồi khi dự đoán đúng.</p>
+                  <div class="bio-mech-props">
+                    <span class="bio-mech-prop">LocalPredictiveStack</span>
+                    <span class="bio-mech-prop">Layer-local</span>
+                    <span class="bio-mech-prop">No backprop</span>
+                  </div>
+                </div>
+                <div class="target-meter">
+                  <div class="target-gauge">
+                    <svg viewBox="0 0 36 36" width="60" height="60">
+                      <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="var(--border-color)" stroke-width="2.5" />
+                      <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="var(--accent-green)" stroke-width="2.5" stroke-dasharray="90, 100" />
+                    </svg>
+                    <div class="target-val" style="position: absolute;">≥90%</div>
+                  </div>
+                  <div class="target-label">Giảm Lỗi</div>
+                </div>
+              </div>
+              
+              <!-- SDR v2 -->
+              <div class="bio-mechanism-card">
+                <div class="bio-mech-info">
+                  <h4>2. Virtual Sparse SDR</h4>
+                  <p>Mã hóa dữ liệu dạng thưa phân tán chiều cao (Virtual dimension). Lưu trữ tối ưu mà không cấp phát ma trận dày đặc.</p>
+                  <div class="bio-mech-props">
+                    <span class="bio-mech-prop">VirtualSparseSDR</span>
+                    <span class="bio-mech-prop">Dim=100k</span>
+                    <span class="bio-mech-prop">Overlap Match</span>
+                  </div>
+                </div>
+                <div class="target-meter">
+                  <div class="target-gauge">
+                    <svg viewBox="0 0 36 36" width="60" height="60">
+                      <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="var(--border-color)" stroke-width="2.5" />
+                      <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="var(--accent-green)" stroke-width="2.5" stroke-dasharray="100, 100" />
+                    </svg>
+                    <div class="target-val" style="position: absolute;">&gt;2^500</div>
+                  </div>
+                  <div class="target-label">Capacity</div>
+                </div>
+              </div>
+
+              <!-- Cortical Columns -->
+              <div class="bio-mechanism-card">
+                <div class="bio-mech-info">
+                  <h4>3. Cortical Columns</h4>
+                  <p>Bộ nhớ chuỗi lấy cảm hứng từ HTM (Hierarchical Temporal Memory). Burst khi gặp sự kiện bất ngờ, tự động ẩn khi dự đoán đúng.</p>
+                  <div class="bio-mech-props">
+                    <span class="bio-mech-prop">CorticalColumnSequenceMemory</span>
+                    <span class="bio-mech-prop">Sequence Recall</span>
+                  </div>
+                </div>
+                <div class="target-meter">
+                  <div class="target-gauge">
+                    <svg viewBox="0 0 36 36" width="60" height="60">
+                      <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="var(--border-color)" stroke-width="2.5" />
+                      <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="var(--accent-green)" stroke-width="2.5" stroke-dasharray="95, 100" />
+                    </svg>
+                    <div class="target-val" style="position: absolute;">≥95%</div>
+                  </div>
+                  <div class="target-label">Ngữ Pháp</div>
+                </div>
+              </div>
+
+              <!-- Hippocampus -->
+              <div class="bio-mechanism-card">
+                <div class="bio-mech-info">
+                  <h4>4. Hippocampal Memory</h4>
+                  <p>Học tập hai tốc độ. Ghi nhớ nhanh các sự kiện bất ngờ vào Episodic Fast, sau đó củng cố dần vào bộ nhớ Semantic Slow.</p>
+                  <div class="bio-mech-props">
+                    <span class="bio-mech-prop">HippocampalMemory</span>
+                    <span class="bio-mech-prop">Two-speed</span>
+                    <span class="bio-mech-prop">Replay-based</span>
+                  </div>
+                </div>
+                <div class="target-meter">
+                  <div class="target-gauge">
+                    <svg viewBox="0 0 36 36" width="60" height="60">
+                      <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="var(--border-color)" stroke-width="2.5" />
+                      <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="var(--accent-green)" stroke-width="2.5" stroke-dasharray="100, 100" />
+                    </svg>
+                    <div class="target-val" style="position: absolute;">100%</div>
+                  </div>
+                  <div class="target-label">Hồi Tưởng</div>
+                </div>
+              </div>
+
+              <!-- Neuromodulation -->
+              <div class="bio-mechanism-card">
+                <div class="bio-mech-info">
+                  <h4>5. Neuromodulation</h4>
+                  <p>Mã hóa hệ thống chất truyền dẫn thần kinh (Dopamine, Acetylcholine, Serotonin) điều tiết độ dẻo synapse (plasticity gates).</p>
+                  <div class="bio-mech-props">
+                    <span class="bio-mech-prop">BioNeuromodulator</span>
+                    <span class="bio-mech-prop">Attention Gating</span>
+                  </div>
+                </div>
+                <div class="target-meter">
+                  <div class="target-gauge">
+                    <svg viewBox="0 0 36 36" width="60" height="60">
+                      <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="var(--border-color)" stroke-width="2.5" />
+                      <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="var(--accent-green)" stroke-width="2.5" stroke-dasharray="95, 100" />
+                    </svg>
+                    <div class="target-val" style="position: absolute;">95%</div>
+                  </div>
+                  <div class="target-label">Novel Gate</div>
+                </div>
+              </div>
+
+              <!-- Dendritic computation -->
+              <div class="bio-mechanism-card">
+                <div class="bio-mech-info">
+                  <h4>6. Dendritic Computation</h4>
+                  <p>Nhánh dendritic phi tuyến thưa. Cho phép giải quyết các bài toán phi tuyến (như XOR) chỉ với một tế bào thần kinh (neuron).</p>
+                  <div class="bio-mech-props">
+                    <span class="bio-mech-prop">DendriticLayer</span>
+                    <span class="bio-mech-prop">XOR solving</span>
+                    <span class="bio-mech-prop">Hebbian local</span>
+                  </div>
+                </div>
+                <div class="target-meter">
+                  <div class="target-gauge">
+                    <svg viewBox="0 0 36 36" width="60" height="60">
+                      <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="var(--border-color)" stroke-width="2.5" />
+                      <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="var(--accent-green)" stroke-width="2.5" stroke-dasharray="100, 100" />
+                    </svg>
+                    <div class="target-val" style="position: absolute;">XOR</div>
+                  </div>
+                  <div class="target-label">Khả Năng</div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+          
+        </div>
+      </div>
+
+      <!-- TAB 5: KEY ALGORITHMS STUDIO -->
+      <div id="tab-algorithms" class="tab-content">
+        <div class="algo-container">
+          
+          <div class="algo-sidebar">
+            <div class="algo-list">
+              <button class="algo-list-btn active" onclick="loadAlgorithm(0)">1. LivingSynapse Forward</button>
+              <button class="algo-list-btn" onclick="loadAlgorithm(1)">2. PC Observe (Local)</button>
+              <button class="algo-list-btn" onclick="loadAlgorithm(2)">3. Semantic SDR Encode</button>
+              <button class="algo-list-btn" onclick="loadAlgorithm(3)">4. Sparse Memory Lookup</button>
+              <button class="algo-list-btn" onclick="loadAlgorithm(4)">5. Cortical Column Forward</button>
+              <button class="algo-list-btn" onclick="loadAlgorithm(5)">6. Homeostasis Monitor</button>
+              <button class="algo-list-btn" onclick="loadAlgorithm(6)">7. Generation Scoring</button>
+            </div>
+          </div>
+          
+          <div class="algo-viewport">
+            <div class="algo-meta">
+              <div class="algo-title" id="algo-title-text">Sparse Forward Pass (LivingSynapseLayer)</div>
+              <div class="algo-complexity" id="algo-complexity-text">Complexity: O(out_dim * len(active))</div>
+            </div>
+            
+            <div class="algo-editor-split">
+              <div class="algo-code-side">
+                <pre class="code-block" id="algo-code-display">
+                  <!-- Loaded dynamically by JS -->
+                </pre>
+              </div>
+              <div class="algo-explain-side">
+                <div class="algo-explain-title">Cơ chế hoạt động</div>
+                <div class="algo-explain-text" id="algo-explain-desc">
+                  Thực hiện lan truyền xuôi thưa dựa trên các chỉ mục hoạt động thay vì tính toán ma trận dày đặc.
+                </div>
+                <div class="algo-explain-title" style="margin-top: 24px;">Các bước xử lý</div>
+                <ul class="algo-step-list" id="algo-steps-display">
+                  <!-- Loaded dynamically -->
+                </ul>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </main>
+
+    <!-- Right Spotlight/Inspector Sidebar -->
+    <aside class="inspector-panel">
+      <div class="inspector-header">
+        <h3>Component Spotlight</h3>
+        <span class="inspector-badge" id="inspect-badge" style="background: var(--bg-surface-elevated); color: var(--text-secondary);">Idle</span>
+      </div>
+      
+      <div class="inspector-body" id="inspect-body-content">
+        <!-- Default State when no node selected -->
+        <div class="inspector-placeholder">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="16" x2="12" y2="12"></line>
+            <line x1="12" y1="8" x2="12.01" y2="8"></line>
+          </svg>
+          <p>Nhấp vào một thành phần trong sơ đồ hệ thống hoặc danh sách lớp để kiểm tra chi tiết cấu trúc, vai trò và mã nguồn.</p>
+        </div>
+      </div>
+
+      <div class="inspector-actions" id="inspect-actions-area" style="display: none;">
+        <button class="inspect-btn" onclick="scrollToClassCard()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>
+          Xem Chi Tiết Class
+        </button>
+        <button class="inspect-btn inspect-btn-primary" onclick="showSourceModal()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+          Xem Signature
+        </button>
+      </div>
+    </aside>
+
+  </div>
+
+  <!-- Python Signature Code Details Modal -->
+  <div class="modal-overlay" id="code-modal" onclick="closeSourceModal()">
+    <div class="modal-card" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <h3 id="modal-class-title">Class Signature View</h3>
+        <button class="modal-close" onclick="closeSourceModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <pre class="code-block" style="margin: 0;" id="modal-code-display">
+          <!-- Loaded dynamically -->
+        </pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- JavaScript Database and Logic -->
+  <script>
+    // 1. DATA BASE OF CORE LSL CLASSES
+    const componentsData = [
+      {
+        id: "lsl_core_model",
+        name: "LSLCoreModel",
+        file: "lsl/core.py",
+        layer: "unified",
+        badge: "Facade",
+        color: "var(--accent-orange)",
+        description: "Lớp vỏ Facade thống nhất xử lý tất cả các yêu cầu bên ngoài như huấn luyện (train_stream), suy luận (generate), trả lời câu hỏi (answer), lưu/tải trạng thái (save/load).",
+        relationships: [
+          "Chứa BioComputeAgent đóng vai trò là lõi tính toán sinh học.",
+          "Chứa LivingSynapseLayer cung cấp nhân tính toán thưa tăng tốc C.",
+          "Ủy quyền mã hóa/giải mã cho SubwordTokenizer."
+        ],
+        code: `class LSLCoreModel:
+    """Unified facade for train/evaluate/generate/save/load"""
+    
+    # Core Components
+    agent: BioComputeAgent              # Integrated bio-compute agent
+    native_transition: LivingSynapseLayer  # Native C sparse kernel
+    
+    # Key Methods
+    build_tokenizer(text)              # Build shared tokenizer
+    encode(text) → List[int]           # Text to tokens
+    decode(tokens) → str               # Tokens to text
+    observe_token(token, learn)        # Single token observation
+    train_stream(texts)                # Stream training
+    generate(prompt, max_tokens)       # Text generation
+    answer(question)                   # QA answering
+    save(path) / load(path)            # Checkpoint I/O`,
+        profiles: ["full", "native_fast", "bio_native"]
+      },
+      {
+        id: "bio_compute_agent",
+        name: "BioComputeAgent",
+        file: "lsl/bio.py",
+        layer: "bio",
+        badge: "Compute Orchestrator",
+        color: "var(--accent-green)",
+        description: "Bộ điều phối tính toán sinh học tích hợp 6 cơ chế sinh học cốt lõi (Predictive Coding, SDR, Cortical Columns, Hippocampus, Neuromodulator, Dendrites) và liên kết chúng với các hệ thống bộ nhớ thâm dụng dữ liệu khác.",
+        relationships: [
+          "Đồng bộ hóa 6 cơ chế sinh học cốt lõi và Homeostatic Controller.",
+          "Tích hợp các hệ thống Long Context Memory, World Memory và Entity Event Graph.",
+          "Cung cấp giao diện observe_chunk() và predict_next_token_id() để mô hình Facade gọi."
+        ],
+        code: `class BioComputeAgent:
+    """Integrated biological computation agent"""
+    
+    # Six Biological Mechanisms
+    pc_v2: LocalPredictiveStack         # Predictive coding v2
+    sdr_v2: VirtualSparseSDR            # SDR v2 (virtual sparse)
+    columns: CorticalColumnSequenceMemory  # Cortical columns
+    hippocampus: HippocampalMemory      # Two-speed memory
+    bio_modulator: BioNeuromodulator   # Neuromodulation gates
+    dendrites: DendriticLayer          # Dendritic computation
+    
+    # Supporting Systems
+    long_context: LongContextMemory     # Long-context retrieval
+    world: WorldMemory                 # World/evidence memory
+    events: EntityEventGraph           # Entity-event graph
+    workspace: ReasoningWorkspace      # Reasoning workspace
+    homeostasis: HomeostaticController # Self-tuning controller
+    generator: GenerationController    # Generation controller
+    
+    # Key Methods
+    build_tokenizer(text)              # Build vocabulary
+    observe_chunk(text, source)        # Observe text chunk
+    predict_next_token_id(tokens)      # Next token prediction
+    consolidate(replay_fraction)       # Memory consolidation`,
+        profiles: ["full", "bio_native"]
+      },
+      {
+        id: "local_predictive_stack",
+        name: "LocalPredictiveStack",
+        file: "lsl/bio.py",
+        layer: "bio",
+        badge: "Predictive Coding",
+        color: "var(--accent-green)",
+        description: "Hiện thực cơ chế Predictive Coding v2. Dự đoán cục bộ các trạng thái thưa theo tầng mà không dựa trên backpropagation ngược. Chỉ cập nhật bảng liên kết khi phát sinh sai số vượt ngưỡng.",
+        relationships: [
+          "Dữ liệu đầu vào lấy từ VirtualSparseSDR.",
+          "Cung cấp tín hiệu sai số (surprise) cho BioNeuromodulator."
+        ],
+        code: `class LocalPredictiveStack:
+    """Layer-local predictor with exact local tables"""
+    
+    # State
+    tables: List[Dict[Tuple[int, ...], Counter]]  # Per-layer prediction tables
+    prev_states: List[Optional[Tuple[int, ...]]]   # Previous states
+    
+    # Key Methods
+    state_for(token, layer) → Tuple[int, ...]      # Get state for token
+    observe(states, learn) → Dict[str, float]       # Observe and learn
+    predict_state(layer, prev) → Tuple[Optional[Tuple[int, ...]], float]`,
+        profiles: ["full", "bio_native"]
+      },
+      {
+        id: "virtual_sparse_sdr",
+        name: "VirtualSparseSDR",
+        file: "lsl/bio.py",
+        layer: "bio",
+        badge: "SDR Engine",
+        color: "var(--accent-green)",
+        description: "Cơ chế mã hóa SDR v2 ảo. Cho phép ánh xạ token thành các vector nhị phân thưa kích thước lớn (đến 100k chiều) mà không cần phân bổ bộ nhớ vật lý dày đặc nhờ hàm băm tất định.",
+        relationships: [
+          "Mã hóa các đầu vào nhị phân thưa cho LivingSynapseLayer và DendriticLayer.",
+          "Cung cấp các phép toán đo độ khớp overlap cục bộ giữa các token."
+        ],
+        code: `class VirtualSparseSDR:
+    """Virtual sparse SDR without dense allocation"""
+    
+    # Parameters
+    dim: int = 100000                # Virtual dimension
+    k: int = 20                      # Active bits per code
+    
+    # Key Methods
+    encode(token) → Tuple[int, ...]   # Encode token to sparse bits
+    observe_related_ids(prev, curr)  # Learn token relationships
+    overlap(a, b) → int              # Compute overlap`,
+        profiles: ["full", "bio_native"]
+      },
+      {
+        id: "cortical_column_sequence_memory",
+        name: "CorticalColumnSequenceMemory",
+        file: "lsl/cortical_column.py",
+        layer: "bio",
+        badge: "Sequence Memory",
+        color: "var(--accent-green)",
+        description: "Học tập trình tự kiểu HTM (Hierarchical Temporal Memory). Bao gồm các cột vỏ não chứa nhiều tế bào. Phát tín hiệu 'burst' kích hoạt khi phát hiện bất ngờ và ẩn đi khi dự đoán đúng nhằm tiết kiệm năng lượng.",
+        relationships: [
+          "Học các chuỗi quan sát liên tục.",
+          "Cung cấp độ tin cậy dự đoán chuỗi cho bộ điều phối GenerationController."
+        ],
+        code: `class CorticalColumnSequenceMemory:
+    """HTM-like temporal memory with burst/silent dynamics"""
+    
+    # State
+    column_active: np.ndarray        # (vocab_size, cells_per_column)
+    temporal_segments: Dict         # Transition memory
+    predicted_cells: Set             # Predicted cells
+    active_cells: Set                # Currently active cells
+    
+    # Key Methods
+    forward(token, learn) → Dict     # Process token, learn transitions
+    reset_state()                    # Reset active state
+    prune_memory(max_segments, ...)  # Prune old segments`,
+        profiles: ["full", "bio_native"]
+      },
+      {
+        id: "hippocampal_memory",
+        name: "HippocampalMemory",
+        file: "lsl/bio.py",
+        layer: "bio",
+        badge: "Hippocampus",
+        color: "var(--accent-green)",
+        description: "Mô phỏng cơ chế bộ nhớ hai tốc độ của hải mã. Bộ nhớ nhanh (fast_memory) ghi nhận nhanh chóng các liên kết từ bất ngờ, sau đó định kỳ phát lại (replay) để củng cố dần vào bộ nhớ chậm ổn định (slow_memory).",
+        relationships: [
+          "Lưu trữ các transition thưa dựa trên chỉ số surprise từ Predictive Coding.",
+          "Thực hiện chu trình consolidate() truyền tri thức sang W_slow của LivingSynapseLayer."
+        ],
+        code: `class HippocampalMemory:
+    """Two-speed memory: fast (surprising) + slow (consolidated)"""
+    
+    # Fast/Slow Memory
+    fast_memory: SparseKeyValueMemory  # Recent surprising events
+    slow_memory: SparseKeyValueMemory  # Consolidated knowledge
+    
+    # Key Methods
+    observe_transition_ids(prev, curr, surprise)  # Store transition
+    recall_transition_id(query) → Optional[int]   # Recall transition
+    consolidate(replay_fraction) → int            # Replay and consolidate
+    prune(max_fast, max_slow)                     # Prune old entries`,
+        profiles: ["full", "bio_native"]
+      },
+      {
+        id: "bio_neuromodulator",
+        name: "BioNeuromodulator",
+        file: "lsl/bio.py",
+        layer: "bio",
+        badge: "Neuromodulation",
+        color: "var(--accent-green)",
+        description: "Hệ thống điều hòa kích hoạt lấy cảm hứng từ các chất dẫn truyền thần kinh Dopamine, Acetylcholine và Serotonin. Điều chỉnh độ dẻo của synapse (learning rate, update gates) dựa trên mức độ bất ngờ và tính mới lạ.",
+        relationships: [
+          "Theo dõi tính mới lạ của token và lỗi của Predictive coding.",
+          "Tính toán cổng dopamine/acetylcholine làm tham số cho LivingSynapseLayer."
+        ],
+        code: `class BioNeuromodulator:
+    """Dopamine/acetylcholine/serotonin-style gates"""
+    
+    # State
+    seen: Dict[str, int]            # Token novelty tracking
+    tone: float                     # Global tone (0-1)
+    
+    # Key Methods
+    gates(key, surprise) → Dict[str, float]  # Compute gate values
+    observe_token_id(token, surprise)         # Update novelty
+    observe(key, surprise)                    # Generic observation`,
+        profiles: ["full", "bio_native"]
+      },
+      {
+        id: "dendritic_layer",
+        name: "DendriticLayer",
+        file: "lsl/bio.py",
+        layer: "bio",
+        badge: "Dendritic compute",
+        color: "var(--accent-green)",
+        description: "Cung cấp khả năng tính toán phi tuyến thưa trên các nhánh dendritic. Giúp giải quyết bài toán phi tuyến phức tạp (ví dụ như cổng XOR) chỉ bằng một tế bào thần kinh duy nhất.",
+        relationships: [
+          "Mã hóa các liên kết SDR thưa.",
+          "Chứa tập hợp DendriticSegment đóng vai trò là các nhánh phân biệt thụ cảm."
+        ],
+        code: `class DendriticLayer:
+    """Sparse dendritic branches with local nonlinear compute"""
+    
+    # State
+    branches: Dict[int, DendriticSegment]  # Branch by hash
+    input_dim: int                  # Input dimension
+    
+    # Key Methods
+    observe(bits, output)           # Learn branch association
+    predict(bits) → Optional[int]   # Predict from dendrites
+    prune_branches(max_branches)     # Prune inactive branches`,
+        profiles: ["full", "bio_native"]
+      },
+      {
+        id: "homeostatic_controller",
+        name: "HomeostaticController",
+        file: "lsl/homeostasis.py",
+        layer: "bio",
+        badge: "Homeostasis",
+        color: "var(--accent-green)",
+        description: "Tự động cân bằng nội môi. Giữ cho hoạt động thưa và độ dẻo cập nhật trong phạm vi ổn định mục tiêu bằng cách điều chỉnh ngưỡng ức chế và tốc độ mệt mỏi synapse theo thời gian thực.",
+        relationships: [
+          "Theo dõi sai số và mức độ thưa (sparsity) từ BioComputeAgent.",
+          "Điều chỉnh learning rate cục bộ và ngưỡng suppression_threshold."
+        ],
+        code: `class HomeostaticController:
+    """Keeps sparse activity and update strength in stable ranges"""
+    
+    # State & Parameters
+    state: HomeostaticState          # Current homeostatic state
+    error_ema: float                 # EMA of error
+    sparsity_ema: float              # EMA of sparsity
+    
+    # Key Methods
+    observe(active_count, total_count, local_error) → HomeostaticState
+    diagnostics() → Dict`,
+        profiles: ["full", "bio_native"]
+      },
+      {
+        id: "living_synapse_layer",
+        name: "LivingSynapseLayer",
+        file: "lsl/synapse.py",
+        layer: "synapse",
+        badge: "Synapse acceleration",
+        color: "var(--accent-cyan)",
+        description: "Lớp học tập synapse cơ bản. Chia tách trọng số thành 2 ma trận: W_slow (tri thức củng cố, ít biến động) và W_live (học tập nhanh tại chỗ). Tích hợp cơ chế mệt mỏi synapse (fatigue) tự phục hồi.",
+        relationships: [
+          "Sử dụng thư viện C mở rộng (sparse_native.py) để tính toán thưa cực nhanh.",
+          "Hợp tác với HippocampalMemory trong quá trình consolidate() chuyển giao trọng số."
+        ],
+        code: `class LivingSynapseLayer:
+    """Local online synapse primitive"""
+    
+    # Weights
+    W_slow: np.ndarray               # Stable weights (consolidated)
+    W_live: np.ndarray               # Plastic weights (online learning)
+    fatigue: np.ndarray              # Synapse fatigue (0-1)
+    
+    # Key Methods
+    forward(x, use_sparse) → np.ndarray  # Forward pass
+    forward_active(active_indices, active_values) → np.ndarray  # Sparse forward
+    top_k_supervised_update(error, lr, k_frac, max_norm)  # Top-k supervised
+    consolidate(threshold, fraction) → int  # Consolidate live → slow
+    inference_plasticity(lr)         # Online learning during inference`,
+        profiles: ["full", "native_fast", "bio_native"]
+      },
+      {
+        id: "long_context_memory",
+        name: "LongContextMemory",
+        file: "lsl/long_context.py",
+        layer: "memory",
+        badge: "Subsystem",
+        color: "var(--accent-purple)",
+        description: "Hệ thống lưu trữ ngữ cảnh dài hạn thưa chịu trách nhiệm ghi nhớ các transition tiếp diễn (n-gram) của token, các thực tế (facts) và các chỉ dẫn (instructions). Giới hạn tìm kiếm thưa không quét toàn bộ.",
+        relationships: [
+          "Kế thừa và chứa các thực thể SparseKeyValueMemory riêng biệt.",
+          "Trả về các ứng cử viên chuyển tiếp token tiếp theo cho GenerationController."
+        ],
+        code: `class LongContextMemory:
+    """Bounded sparse memory for transitions, facts, instructions"""
+    
+    # Sub-memories
+    transitions: SparseKeyValueMemory      # Next-token transitions
+    unigram_transitions: SparseKeyValueMemory  # Unigram transitions
+    facts: SparseKeyValueMemory            # Fact storage
+    instructions: SparseKeyValueMemory     # Instruction storage
+    
+    # Key Methods
+    observe_transition(token, target, vocab_size)  # Store transition
+    predict_next(token, vocab_size, return_confidence) → Optional[int]
+    next_candidates(token, limit) → List[int]  # Get candidates`,
+        profiles: ["full", "native_fast", "bio_native"]
+      },
+      {
+        id: "world_memory",
+        name: "WorldMemory",
+        file: "lsl/world_memory.py",
+        layer: "memory",
+        badge: "Subsystem",
+        color: "var(--accent-purple)",
+        description: "Bộ nhớ lưu trữ các đoạn văn bản dài và bằng chứng thực tế dạng thưa. Sử dụng phục vụ chức năng tìm kiếm thông tin ngữ cảnh để trả lời câu hỏi kèm trích dẫn (QA with citation).",
+        relationships: [
+          "Được truy vấn trực tiếp bởi IntegratedLSLAgent để cung cấp câu trả lời thực tế.",
+          "Lưu trữ dữ liệu trong cấu trúc SparseKeyValueMemory."
+        ],
+        code: `class WorldMemory:
+    """Bounded world/evidence memory for QA"""
+    
+    # Storage
+    chunks: SparseKeyValueMemory      # Text chunks
+    evidence: SparseKeyValueMemory   # Evidence records
+    
+    # Key Methods
+    observe_chunk(text, source)      # Store text chunk
+    answer(question) → EvidenceAnswer  # Answer with evidence
+    add_evidence(question, answer, evidence_id)  # Add evidence`,
+        profiles: ["full", "bio_native"]
+      },
+      {
+        id: "sparse_key_value_memory",
+        name: "SparseKeyValueMemory",
+        file: "lsl/memory.py",
+        layer: "memory",
+        badge: "Base Memory",
+        color: "var(--accent-purple)",
+        description: "Lớp cơ sở của bộ lưu trữ thưa khóa-giá trị (Sparse Key-Value). Sử dụng LSH (Locality Sensitive Hashing) phân cụm đặc trưng SDR nhị phân để truy vấn nhanh mà không cần duyệt tuyến tính O(N).",
+        relationships: [
+          "Được dùng làm khối xây dựng cho LongContextMemory, WorldMemory và HippocampalMemory."
+        ],
+        code: `class SparseKeyValueMemory:
+    """Bounded sparse key-value memory with candidate lookup"""
+    
+    # Index Structures
+    _records: Dict[int, Tuple]      # Slot → (signature, value, key)
+    _signature_to_slot: Dict        # Signature → slot
+    _key_to_slot: Dict              # (key, vocab) → slot
+    
+    # Key Methods
+    add(key, value, vocab_size)      # Store key-value pair
+    lookup(query, vocab_size, top_k) → Optional[int]  # Retrieve
+    diagnostics() → Dict             # Lookup diagnostics`,
+        profiles: ["full", "native_fast", "bio_native"]
+      },
+      {
+        id: "relation_memory",
+        name: "RelationMemory",
+        file: "lsl/reasoning.py",
+        layer: "reason",
+        badge: "Subsystem",
+        color: "var(--accent-pink)",
+        description: "Bộ nhớ liên kết cục bộ định hướng. Hỗ trợ việc lưu trữ các quan hệ nhân quả (causal) và cho phép truy vấn duyệt đồ thị đa bước (multi-hop) trực tiếp giữa các nút khái niệm.",
+        relationships: [
+          "Đóng vai trò hệ thống suy luận phục vụ cho IntegratedLSLAgent.",
+          "Lưu trữ liên kết trực tiếp và quy luật offset rules để suy luận quan hệ mới."
+        ],
+        code: `class RelationMemory:
+    """Directed local association memory with multi-hop queries"""
+    
+    # Storage
+    edges: Dict[int, Counter]        # source → {target: strength}
+    relation_edges: Dict[str, Dict[int, Counter]]  # relation → edges
+    
+    # Key Methods
+    observe(source, target, relation, strength)  # Store relation
+    observe_chain(tokens, relation)              # Store sequence
+    predict_multihop(source, hops, relation) → Optional[int]  # Multi-hop`,
+        profiles: ["full", "bio_native"]
+      },
+      {
+        id: "role_binding_memory",
+        name: "RoleBindingMemory",
+        file: "lsl/reasoning.py",
+        layer: "reason",
+        badge: "Subsystem",
+        color: "var(--accent-pink)",
+        description: "Bộ nhớ liên kết Subject/Verb/Object (Chủ ngữ - Động từ - Tân ngữ). Cho phép tìm kiếm một phần tử còn thiếu trong bộ ba khi biết trước hai phần tử kia.",
+        relationships: [
+          "Hỗ trợ cấu trúc ngôn ngữ ngữ pháp trong suy luận câu hỏi.",
+          "Cung cấp chỉ số liên kết cho ReasoningWorkspace."
+        ],
+        code: `class RoleBindingMemory:
+    """Local subject/verb/object binding memory"""
+    
+    # Storage
+    object_by_subject_verb: Dict[Tuple[int, int], Counter]  # (S,V) → O
+    subject_by_verb_object: Dict[Tuple[int, int], Counter]  # (V,O) → S
+    
+    # Key Methods
+    observe_event(subject, verb, obj, strength)  # Store SVO event
+    predict_object(subject, verb) → Optional[int]  # Predict object
+    predict_subject(verb, obj) → Optional[int]    # Predict subject`,
+        profiles: ["full", "bio_native"]
+      },
+      {
+        id: "entity_event_graph",
+        name: "EntityEventGraph",
+        file: "lsl/workspace.py",
+        layer: "reason",
+        badge: "Subsystem",
+        color: "var(--accent-pink)",
+        description: "Đồ thị cục bộ biểu diễn các thực thể, sự kiện, kịch bản (episodes) và bằng chứng logic. Giúp thiết lập quan hệ nhân quả dài hạn hơn và truy vấn vết nguồn gốc bằng chứng.",
+        relationships: [
+          "Phối hợp với WorldMemory để đối chiếu bằng chứng khi trả lời câu hỏi."
+        ],
+        code: `class EntityEventGraph:
+    """Local graph for entity, event, episode, evidence reasoning"""
+    
+    # Storage
+    edges: Dict[Tuple[int, int], Counter]  # (S,R) → {O: strength}
+    evidence: Dict[Tuple[int, int, int], int]  # (S,R,O) → evidence_id
+    episodes: Dict[int, List[Tuple[int, int, int]]]  # episode_id → events
+    
+    # Key Methods
+    observe_event(subject, relation, obj, episode_id, evidence_id, strength)
+    query_chain(start, relations) → Optional[int]  # Chain query`,
+        profiles: ["full", "bio_native"]
+      },
+      {
+        id: "reasoning_workspace",
+        name: "ReasoningWorkspace",
+        file: "lsl/workspace.py",
+        layer: "reason",
+        badge: "Workspace",
+        color: "var(--accent-pink)",
+        description: "Không gian làm việc cục bộ tạm thời. Quản lý việc ánh xạ biến số, lưu giữ các mục tiêu con (subgoals) và vết thực thi logic của các tác vụ suy luận nhiều bước.",
+        relationships: [
+          "Cung cấp không gian làm việc cho Agent và các tác vụ tính toán vết (traces)."
+        ],
+        code: `class ReasoningWorkspace:
+    """Bounded local workspace for steps, variables, bindings"""
+    
+    # Storage
+    variables: Dict[str, int]        # Role → value
+    bindings: Dict[Tuple[int, int], int]  # (left, relation) → right
+    
+    # Key Methods
+    bind(role, filler)              # Bind variable
+    resolve(role) → Optional[int]    # Resolve variable
+    add_step(name, value, support)   # Add execution step`,
+        profiles: ["full", "bio_native"]
+      },
+      {
+        id: "generation_controller",
+        name: "GenerationController",
+        file: "lsl/generation.py",
+        layer: "unified",
+        badge: "Generation",
+        color: "var(--accent-orange)",
+        description: "Bộ điều khiển tạo sinh văn bản. Chịu trách nhiệm chấm điểm các từ ứng cử viên dựa trên xác suất chuyển tiếp từ LongContextMemory, đồng thời áp dụng hình phạt mệt mỏi (repetition fatigue) để chống lặp từ.",
+        relationships: [
+          "Sử dụng LongContextMemory để lấy các ứng cử viên chuyển tiếp.",
+          "Duy trì DiscourseState để theo dõi các n-gram từ đã sinh ra nhằm tránh rơi vào các vòng lặp vô tận (bigram/trigram loops)."
+        ],
+        code: `class GenerationController:
+    """Local candidate scorer for open generation"""
+    
+    # Components
+    memory: LongContextMemory        # Long-context memory
+    plan: DiscoursePlan              # Generation plan
+    
+    # Key Methods
+    observe_sequence(tokens)         # Observe token sequence
+    candidate_scores(current, state) → Dict[int, float]  # Score candidates
+    choose_next(current, state) → Optional[int]  # Choose next token
+    generate(prompt, max_new_tokens, plan) → List[int]  # Generate text`,
+        profiles: ["full", "native_fast", "bio_native"]
+      },
+      {
+        id: "semantic_sdr_encoder",
+        name: "SemanticSDREncoder",
+        file: "lsl/semantic_sdr.py",
+        layer: "synapse",
+        badge: "SDR Encoder",
+        color: "var(--accent-cyan)",
+        description: "Bộ mã hóa SDR ngữ nghĩa. Kết hợp không gian nhúng Word2Vec mật độ thấp và phép chiếu ngẫu nhiên (Random Projection - định lý Johnson-Lindenstrauss) để tạo ra các mã nhị phân thưa mà các từ có ý nghĩa tương đương sẽ có tỷ lệ chồng chập overlap cao.",
+        relationships: [
+          "Ánh xạ token từ ngữ nghĩa dense embedding sang biểu diễn thưa nhị phân.",
+          "Được sử dụng bởi VirtualSparseSDR làm bộ sinh mã ngữ nghĩa ban đầu."
+        ],
+        code: `class SemanticSDREncoder:
+    """Semantic SDR encoder: Word2Vec + Random Projection → binary SDR"""
+    
+    # Parameters
+    vocab_size: int
+    sdr_dim: int = 1024
+    sparsity: float = 0.02
+    
+    # Key Methods
+    encode(token_id) → Tuple[int, ...]  # Encode token to sparse bits
+    load_builtin_embeddings(vocab) → int  # Load embeddings
+    build_embeddings_from_corpus(token_ids)  # Build from corpus`,
+        profiles: ["full", "bio_native"]
+      },
+      {
+        id: "integrated_lsl_agent",
+        name: "IntegratedLSLAgent",
+        file: "lsl/agent.py",
+        layer: "unified",
+        badge: "Facade Agent",
+        color: "var(--accent-orange)",
+        description: "Tác tử tích hợp điều phối các chiến lược trả lời câu hỏi nghiêm ngặt: đầu tiên thử thực hiện các vết tính toán số học/stack, tiếp theo thử truy vấn đồ thị quan hệ xâu chuỗi, cuối cùng là tìm kiếm dựa trên World Memory và Entity Event Graph.",
+        relationships: [
+          "Bao bọc tất cả hệ thống bộ nhớ, suy luận, và điều khiển tạo sinh.",
+          "Chứa cơ chế TraceReasoningMemory để thực thi các vết tính toán số học tự trị."
+        ],
+        code: `class IntegratedLSLAgent:
+    """Integrated strict-path agent for Phase 8 external-style checks"""
+    
+    # Components
+    world: WorldMemory               # World/evidence memory
+    events: EntityEventGraph         # Entity-event graph
+    workspace: ReasoningWorkspace    # Reasoning workspace
+    traces: TraceReasoningMemory     # Trace execution
+    
+    # Key Methods
+    observe_text(text, source, learn_transitions)  # Observe text
+    answer(question) → Optional[str]  # Answer question
+    answer_with_evidence(question) → EvidenceAnswer  # Answer with evidence`,
+        profiles: ["full", "bio_native"]
+      }
+    ];
+
+    // 2. DATA FLOW SIMULATOR SEQUENCES
+    const flows = {
+      train: {
+        title: "Luồng Huấn luyện (Training / Observe Flow)",
+        steps: [
+          {
+            num: "1",
+            name: "Text Input",
+            nodes: ["lsl_core_model"],
+            desc: "Chuỗi văn bản thô được đưa vào hệ thống thông qua phương thức train_stream() của mô hình LSLCoreModel."
+          },
+          {
+            num: "2",
+            name: "Tokenizer Encoding",
+            nodes: ["lsl_core_model", "bio_compute_agent"],
+            desc: "SimpleSubwordTokenizer phân tích và băm văn bản thành chuỗi các token ID tương ứng trong từ điển."
+          },
+          {
+            num: "3",
+            name: "Semantic SDR Generation",
+            nodes: ["semantic_sdr_encoder", "virtual_sparse_sdr", "sparse_sdr_bus"],
+            desc: "Token ID được biến đổi thành dạng nhị phân thưa phân tán (SDR) bằng cách chiếu ngẫu nhiên vector nhúng từ điển (Word2Vec) lên không gian 100,000 chiều. 20 bit hoạt động được truyền lên SDR Bus."
+          },
+          {
+            num: "4",
+            name: "Predictive Coding Match",
+            nodes: ["local_predictive_stack"],
+            desc: "LocalPredictiveStack sử dụng các bảng dự đoán cục bộ của tầng trước để đưa ra dự đoán về token hiện tại. Tính toán sai số lệch overlap (surprise). Nếu sai số lớn, cập nhật bảng liên kết tại chỗ."
+          },
+          {
+            num: "5",
+            name: "Cortical Column Burst/Suppress",
+            nodes: ["cortical_column_sequence_memory"],
+            desc: "Mô hình Sequence Memory cột vỏ não kiểm tra xem token có nằm trong các tế bào được dự đoán trước đó không. Nếu có, nó kích hoạt ức chế để tiết kiệm năng lượng. Nếu không, nó kích nổ 'burst' kích hoạt cột và học liên kết transition mới."
+          },
+          {
+            num: "6",
+            name: "Neuromodulation Gating",
+            nodes: ["bio_neuromodulator"],
+            desc: "BioNeuromodulator tính toán nồng độ Dopamine (lỗi dự đoán thưởng), Acetylcholine (tính mới lạ/chú ý) và Serotonin dựa trên mức độ bất ngờ. Giá trị này quyết định độ mở (gate) của quá trình học tập synapse."
+          },
+          {
+            num: "7",
+            name: "Hippocampal Quick Learning",
+            nodes: ["hippocampal_memory"],
+            desc: "Nếu token hiện tại có độ bất ngờ (surprise) cao, transition này sẽ được lưu ngay lập tức vào bộ nhớ episodic nhanh của hải mã để chuẩn bị cho chu trình củng cố tri thức sau này."
+          },
+          {
+            num: "8",
+            name: "LivingSynapse Weights Update",
+            nodes: ["living_synapse_layer"],
+            desc: "LivingSynapseLayer cập nhật ma trận học nhanh W_live cho các khớp nối synapse hoạt động (active synapses), đồng thời áp dụng cơ chế mệt mỏi synapse (fatigue) cục bộ nhằm hạn chế bão hòa kích hoạt."
+          },
+          {
+            num: "9",
+            name: "Homeostatic Adaptation",
+            nodes: ["homeostatic_controller"],
+            desc: "HomeostaticController quan sát mức độ thưa tổng thể và sai số trung bình để tinh chỉnh lại ngưỡng ức chế và tốc độ học của toàn hệ thống, đảm bảo mô hình hoạt động ổn định."
+          }
+        ]
+      },
+      generate: {
+        title: "Luồng Tạo sinh Văn bản (Generation Flow)",
+        steps: [
+          {
+            num: "1",
+            name: "Prompt Encoding",
+            nodes: ["lsl_core_model"],
+            desc: "Mô hình nhận chuỗi gợi ý (prompt) ban đầu, mã hóa thành các token ID để thiết lập trạng thái ngữ cảnh ban đầu."
+          },
+          {
+            num: "2",
+            name: "Gather Transition Candidates",
+            nodes: ["long_context_memory"],
+            desc: "LongContextMemory tìm kiếm trong bảng đếm transition cục bộ dựa trên ngữ cảnh 4-token gần nhất để trích xuất ra các token ứng cử viên có khả năng cao xuất hiện tiếp theo."
+          },
+          {
+            num: "3",
+            name: "Native C Kernel Scoring",
+            nodes: ["living_synapse_layer"],
+            desc: "Nhân tính toán thưa C thực hiện nhân ma trận thưa cực nhanh giữa trạng thái hoạt động hiện tại và trọng số tích hợp (W_slow + W_live) * (1 - fatigue) để lấy điểm số dự đoán thô của các token."
+          },
+          {
+            num: "4",
+            name: "Discourse Plan & Coherence",
+            nodes: ["generation_controller"],
+            desc: "GenerationController chấm điểm các ứng cử viên dựa trên xác suất chuyển tiếp, độ khớp của chủ đề định trước, và cộng điểm thưởng cho các thực thể nằm trong DiscoursePlan."
+          },
+          {
+            num: "5",
+            name: "Repetition Fatigue Penalty",
+            nodes: ["generation_controller"],
+            desc: "Bộ điều khiển kiểm tra DiscourseState. Trừ điểm nặng đối với các token vừa xuất hiện thường xuyên (fatigue penalty) hoặc các tổ hợp bigram/trigram bị lặp lại nhiều lần để ngăn chặn lỗi lặp từ vô tận."
+          },
+          {
+            num: "6",
+            name: "Vote Merger & Choose Token",
+            nodes: ["generation_controller", "lsl_core_model"],
+            desc: "Hệ thống tổng hợp điểm từ tất cả các nguồn dự đoán (Native synapse, Long Context, Hippocampus), chọn token có điểm cao nhất làm từ tiếp theo được sinh ra."
+          },
+          {
+            num: "7",
+            name: "Observe Feedback",
+            nodes: ["bio_compute_agent", "living_synapse_layer"],
+            desc: "Token được chọn được đưa ngược lại vào BioComputeAgent dưới dạng một token quan sát thực tế để cập nhật trạng thái hoạt động của tất cả các cơ chế sinh học, chuẩn bị cho việc dự đoán token kế tiếp."
+          }
+        ]
+      },
+      qa: {
+        title: "Luồng Trả lời Câu hỏi (QA Path Flow)",
+        steps: [
+          {
+            num: "1",
+            name: "Question Parsing",
+            nodes: ["integrated_lsl_agent"],
+            desc: "IntegratedLSLAgent tiếp nhận câu hỏi của người dùng và kích hoạt các bộ kiểm tra phân luồng thực thi nghiêm ngặt."
+          },
+          {
+            num: "2",
+            name: "Math & Stack Traces Check",
+            nodes: ["reasoning_workspace"],
+            desc: "Tác tử phân tích câu hỏi để tìm các mẫu số học hoặc vận hành stack. Nếu có, TraceReasoningMemory sẽ thực thi tính toán tuần tự trong ReasoningWorkspace và trả về kết quả lập tức."
+          },
+          {
+            num: "3",
+            name: "Causal Chain Reasoning",
+            nodes: ["entity_event_graph", "relation_memory"],
+            desc: "Nếu là câu hỏi logic/quan hệ, Agent sẽ duyệt qua đồ thị EntityEventGraph và RelationMemory bằng thuật toán đa bước (multi-hop) để liên kết các thực thể nguyên nhân-kết quả."
+          },
+          {
+            num: "4",
+            name: "World Memory Retrieval",
+            nodes: ["world_memory", "sparse_key_value_memory"],
+            desc: "Nếu suy luận logic chưa ra kết quả, mô hình chuyển câu hỏi thành truy vấn thưa tìm kiếm trong WorldMemory để lấy ra các đoạn văn bản chứa bằng chứng liên quan."
+          },
+          {
+            num: "5",
+            name: "Evidence Evaluation & Answer",
+            nodes: ["integrated_lsl_agent"],
+            desc: "Agent tổng hợp câu trả lời từ các bằng chứng tìm được và trả về kết quả kèm theo mã trích dẫn nguồn bằng chứng (evidence_id)."
+          }
+        ]
+      }
+    };
+
+    // 3. KEY ALGORITHMS DATABASE
+    const algorithmsData = [
+      {
+        title: "Sparse Forward Pass (LivingSynapseLayer)",
+        complexity: "Complexity: O(out_dim * len(active))",
+        code: `def forward_active(active_indices, active_values):
+    # Chỉ tính toán đối với các chỉ số đầu vào đang hoạt động (thưa)
+    active = np.asarray(active_indices, dtype=np.intp)
+    x_active = np.asarray(active_values, dtype=np.float32)
+    
+    # Trích xuất các cột tương ứng trong ma trận mệt mỏi và trọng số
+    fatigue_cols = self.fatigue[:, active]
+    W_cols = (self.W_slow[:, active] + self.W_live[:, active]) * (1 - fatigue_cols)
+    
+    # Thực hiện nhân ma trận thưa - vector
+    post = W_cols @ x_active
+    
+    # Cập nhật mức độ mệt mỏi synapse (fatigue)
+    max_s = float(np.max(np.abs(post))) + 1e-8
+    updated_fatigue = 0.98 * fatigue_cols + 0.02 * np.abs(post[:, None] * x_active[None, :]) / max_s
+    self.fatigue[:, active] = np.clip(updated_fatigue, 0.0, 0.9)
+    
+    return post`,
+        desc: "Thực hiện tính toán lan truyền xuôi thưa cực nhanh bằng cách chỉ truy xuất và tính toán trên các cột của ma trận trọng số tương ứng với các bit hoạt động trong vector SDR đầu vào.",
+        steps: [
+          "Lọc ra danh sách chỉ số (active_indices) và giá trị của các bit thưa đang hoạt động.",
+          "Truy xuất ma trận con (W_slow và W_live) tương ứng với các cột này từ ma trận tổng.",
+          "Áp dụng hệ số ức chế mệt mỏi (fatigue) cục bộ lên các khớp synapse này.",
+          "Thực hiện nhân ma trận con với vector giá trị thưa để tính toán điện thế màng sau synapse (post).",
+          "Tăng mệt mỏi synapse tỷ lệ thuận với cường độ kích hoạt và phục hồi mệt mỏi cũ theo hệ số phân rã 0.98."
+        ]
+      },
+      {
+        title: "Predictive Coding (LocalPredictiveStack)",
+        complexity: "Complexity: O(layers * transitions)",
+        code: `def observe(states, learn=True):
+    updates = 0
+    errors = []
+    
+    for layer, current in enumerate(states):
+        prev = prev_states[layer]
+        error = 1.0
+        
+        if prev is not None:
+            # Dự đoán trạng thái hiện tại từ trạng thái trước đó
+            predicted, confidence = predict_state(layer, prev)
+            if predicted is not None:
+                overlap = tuple_overlap_sorted(predicted, current)
+                error = 1.0 - overlap / k
+            
+            # Cập nhật bảng dự đoán nếu sai số vượt ngưỡng theta
+            if learn and error > theta:
+                tables[layer][prev][tuple(current)] += 1.0
+                updates += 1
+        
+        errors.append(error)
+        prev_states[layer] = tuple(current)
+    
+    mean_error = sum(errors) / len(errors)
+    suppression = 1.0 - mean_error
+    return {"mean_error": mean_error, "suppression": suppression, "updates": updates}`,
+        desc: "Tính toán sai số dự đoán cục bộ theo từng tầng dựa trên độ khớp overlap của các SDR nhị phân. Nếu dự đoán đúng, tín hiệu lỗi giảm (suppression), nếu sai số lớn thì hệ thống sẽ cập nhật bảng thống kê liên kết để tự sửa lỗi.",
+        steps: [
+          "Duyệt qua từng tầng (layer) trong cấu trúc dự đoán cục bộ.",
+          "Lấy trạng thái trước đó và gọi hàm predict_state để lấy trạng thái dự kiến cùng độ tin cậy.",
+          "Đo lường mức độ trùng khớp overlap giữa trạng thái dự đoán và trạng thái thực tế.",
+          "Tính toán sai số (error = 1 - overlap/k).",
+          "Nếu chế độ học (learn) được bật và sai số vượt ngưỡng theta, ghi nhận thêm tần suất xuất hiện của transition này vào bảng thống kê."
+        ]
+      },
+      {
+        title: "Semantic SDR Encoding (SemanticSDREncoder)",
+        complexity: "Complexity: O(embed_dim * sdr_dim)",
+        code: `def encode(token_id):
+    # 1. Lấy vector nhúng dense tương ứng từ Word2Vec
+    embedding = embeddings[token_id]  # (embed_dim,)
+    
+    # 2. Phép chiếu ngẫu nhiên (Johnson-Lindenstrauss) sang chiều cao
+    projected = embedding @ projection  # (sdr_dim,)
+    
+    # 3. Chọn top-k phần tử có giá trị tuyệt đối lớn nhất
+    k = int(sdr_dim * sparsity)
+    top_k_indices = np.argpartition(np.abs(projected), -k)[-k:]
+    
+    # 4. Tạo vector nhị phân thưa (SDR)
+    sdr = np.zeros(sdr_dim, dtype=np.float32)
+    sdr[top_k_indices] = 1.0
+    
+    return tuple(int(i) for i in np.where(sdr > 0.5)[0])`,
+        desc: "Chuyển đổi token ID thành biểu diễn SDR nhị phân thưa có tính chất ngữ nghĩa. Sử dụng phép chiếu ngẫu nhiên bảo toàn khoảng cách khoảng cách Euclid để các từ có nghĩa gần nhau sẽ có nhiều bit chung hơn.",
+        steps: [
+          "Truy xuất vector dense embedding của token (được huấn luyện trước qua PMI + SVD).",
+          "Thực hiện nhân ma trận để chiếu vector nhúng lên không gian kích thước lớn (sdr_dim).",
+          "Tìm top-k các chiều có giá trị kích hoạt lớn nhất bằng thuật toán tối ưu argpartition.",
+          "Gán giá trị 1 cho các vị trí top-k này và 0 cho các vị trí còn lại để tạo mã nhị phân thưa.",
+          "Trả về bộ chỉ số (tuple) của các bit hoạt động."
+        ]
+      },
+      {
+        title: "Sparse Memory Lookup (SparseKeyValueMemory)",
+        complexity: "Complexity: O(candidate_cap)",
+        code: `def lookup(query_key, vocab_size, top_k=1):
+    # Chuyển đổi khóa truy vấn thành đặc trưng SDR signature
+    signature = active_indices(query_key, vocab_size)
+    
+    # 1. Thử tìm kiếm trực tiếp trong từ điển chính xác
+    direct_slot = _key_to_slot.get((query_key, vocab_size))
+    if direct_slot in _records:
+        return _records[direct_slot][1]
+    
+    # 2. Thử tìm kiếm khớp signature nhị phân
+    exact_slot = _signature_to_slot.get(signature)
+    if exact_slot in _records:
+        return _records[exact_slot][1]
+    
+    # 3. Tìm kiếm ứng cử viên qua cơ chế băm Band-based LSH
+    candidates = []
+    for band in bands(signature):
+        for slot in reversed(_band_to_slots.get(band, [])):
+            if slot not in seen:
+                candidates.append(slot)
+                seen.add(slot)
+            if len(candidates) >= candidate_cap:
+                break
+    
+    # 4. Chấm điểm các ứng cử viên bằng khoảng cách Hamming
+    best_score = 0
+    best_value = None
+    for slot in candidates:
+        sig, value, key = _records[slot]
+        score = hamming_overlap(sig, signature)
+        if score > best_score:
+            best_score = score
+            best_value = value
+            
+    return best_value`,
+        desc: "Truy vấn bộ nhớ thưa khóa-giá trị mà không cần quét toàn bộ cơ sở dữ liệu lớn. Sử dụng chỉ mục đảo ngược (inverted index) theo dải bit (bands) để gom cụm các bản ghi có độ tương đồng cao.",
+        steps: [
+          "Tạo chữ ký SDR signature đại diện cho khóa cần tìm.",
+          "Thử tra cứu nhanh O(1) trong các bảng hash ánh xạ khóa trực tiếp hoặc signature chính xác.",
+          "Nếu không khớp, chia nhỏ signature thành các dải (bands) để tìm các ứng cử viên khớp một phần từ chỉ mục đảo ngược.",
+          "Giới hạn số lượng ứng cử viên xem xét ở mức candidate_cap để khống chế độ trễ.",
+          "Tính toán số bit trùng khớp (Hamming overlap) để lọc ra giá trị có độ tương đồng cao nhất."
+        ]
+      },
+      {
+        title: "Cortical Column Dynamics",
+        complexity: "Complexity: O(k * active_cells)",
+        code: `def forward(token, learn=True):
+    # Lấy các tế bào dự báo tương ứng với token này
+    predicted_for_token = {cell for (tok, cell) in predicted_cells if tok == token}
+    
+    if len(predicted_for_token) >= k:
+      # Nếu dự báo đúng: Kích hoạt các tế bào dự đoán (Suppression)
+      active_cells = set(sorted(predicted_for_token)[:k])
+      suppression_count += 1
+      burst = False
+    else:
+      # Nếu bất ngờ: Cột bùng nổ kích hoạt tất cả tế bào (Burst)
+      active_cells = _get_column_winner(token, burst=True)
+      burst_count += 1
+      burst = True
+      
+    if learn:
+      # Học tập liên kết chuỗi từ trạng thái hoạt động trước đó
+      for (prev_token, prev_cell) in _prev_active_cells:
+        key = (prev_token, prev_cell)
+        if key not in temporal_segments:
+          temporal_segments[key] = Counter()
+        temporal_segments[key][(token, cell)] += 1.0
+        
+    _predict_next() # Đưa ra dự báo cho bước tiếp theo
+    _prev_active_cells = active_cells
+    return {"predicted": not burst, "burst": burst}`,
+        desc: "Cơ chế học tập chuỗi thưa lấy cảm hứng từ cấu trúc phân cột của vỏ não. Giúp mô hình tự động phát hiện các chuỗi bất ngờ và ức chế các tín hiệu đã biết trước.",
+        steps: [
+          "Kiểm tra xem token đầu vào có nằm trong tập các ô tế bào đã được dự đoán ở bước trước hay không.",
+          "Nếu có, kích hoạt có chọn lọc các tế bào đó (chế độ suppression - tiêu thụ ít tài nguyên).",
+          "Nếu không, kích hoạt tất cả các tế bào trong cột tương ứng (chế độ burst - bùng nổ để học hỏi ngữ cảnh mới).",
+          "Cập nhật tần suất chuyển tiếp giữa các tế bào hoạt động ở bước trước và bước này để củng cố các phân đoạn thời gian (temporal segments).",
+          "Dựa trên các tế bào đang hoạt động hiện tại, tra cứu bảng chuyển tiếp để dự đoán tập tế bào tiếp theo."
+        ]
+      },
+      {
+        title: "Homeostatic Control",
+        complexity: "Complexity: O(1)",
+        code: `def observe(active_count, total_count, local_error):
+    # 1. Tính toán tỷ lệ thưa quan sát được và lỗi cục bộ
+    observed_sparsity = active_count / total_count
+    err = max(0.0, local_error)
+    
+    # 2. Cập nhật đường trung bình động tích lũy (EMA)
+    ema = 0.10
+    sparsity_ema = (1.0 - ema) * sparsity_ema + ema * observed_sparsity
+    error_ema = (1.0 - ema) * error_ema + ema * err
+    
+    # 3. Tính độ lệch so với mục tiêu lý tưởng
+    sparse_delta = sparsity_ema - target_sparsity
+    error_delta = error_ema - target_error
+    
+    # 4. Điều chỉnh động các tham số ngưỡng ức chế và tốc độ học
+    state.suppression_threshold *= 1.0 + 0.05 * adapt_rate * sparse_delta / target_sparsity
+    state.fatigue_rate *= 1.0 + 0.15 * adapt_rate * sparse_delta / target_sparsity
+    state.local_lr *= 1.0 + 0.25 * adapt_rate * error_delta / target_error
+    
+    # Khống chế tham số trong ngưỡng vật lý an toàn
+    state.suppression_threshold = np.clip(state.suppression_threshold, 0.001, 0.20)
+    state.local_lr = np.clip(state.local_lr, min_lr, max_lr)
+    
+    return state`,
+        desc: "Điều tiết cân bằng nội môi nhằm giữ mức độ thưa (sparsity) và độ dẻo synapse ổn định trong suốt quá trình hoạt động liên tục, ngăn ngừa tình trạng kích hoạt quá mức hoặc suy giảm tín hiệu.",
+        steps: [
+          "Đo lường mức độ thưa thực tế (active/total bits) và sai số học tập cục bộ hiện thời.",
+          "Cập nhật các giá trị trung bình động EMA để giảm nhiễu biến động tức thời.",
+          "Nếu mật độ kích hoạt quá dày (thưa thấp), tăng ngưỡng ức chế (suppression_threshold) và tốc độ mệt mỏi để ép thưa trở lại.",
+          "Nếu lỗi huấn luyện tăng cao, tự động nâng dần learning rate cục bộ để đẩy nhanh tốc độ học tập và ngược lại.",
+          "Giới hạn cứng các tham số điều tiết để hệ thống không bị phân kỳ."
+        ]
+      },
+      {
+        title: "Generation Scoring (GenerationController)",
+        complexity: "Complexity: O(candidate_limit * recent_len)",
+        code: `def candidate_scores(current, state):
+    candidates = memory.next_candidates(current, limit=candidate_limit)
+    scores = {}
+    
+    for rank, candidate in enumerate(candidates):
+        # 1. Tính toán điểm xác suất nền tảng từ bộ nhớ ngữ cảnh dài
+        prob = memory.target_probability(current, candidate, vocab_size)
+        score = 2.0 * np.log(max(prob, 1e-12))
+        
+        # 2. Thưởng điểm theo thứ hạng ứng cử viên
+        score += 1.0 / (rank + 1)
+        
+        # 3. Cộng điểm thưởng trùng khớp chủ đề & thực thể đích trong plan
+        if candidate in plan.entity_ids:
+            score += 0.15
+        
+        # 4. Trừ điểm mệt mỏi (fatigue) nếu từ này vừa được xuất hiện
+        fatigue = state.token_fatigue.get(candidate, 0)
+        score -= 0.20 * min(6, fatigue)
+        
+        # 5. Phạt nặng nếu rơi vào vòng lặp bigram hoặc trigram
+        if len(recent) >= 1 and state.bigrams.get((recent[-1], candidate), 0):
+            score -= 0.60 * state.bigrams[(recent[-1], candidate)]
+        if len(recent) >= 2 and state.trigrams.get((recent[-2], recent[-1], candidate), 0):
+            score -= 2.50 * state.trigrams[(recent[-2], recent[-1], candidate)]
+            
+        scores[candidate] = score
+    return scores`,
+        desc: "Thuật toán chấm điểm tổng hợp để lựa chọn từ tiếp theo khi sinh văn bản. Nó cân bằng giữa xác suất ngữ pháp chính xác, độ mạch lạc chủ đề và các cơ chế phạt lặp từ.",
+        steps: [
+          "Lấy danh sách các token ứng cử viên tiềm năng từ LongContextMemory.",
+          "Tính toán điểm số cơ bản dựa trên log xác suất chuyển tiếp.",
+          "Cộng điểm thưởng nếu từ đó thuộc danh mục các thực thể hoặc phong cách viết yêu cầu trong DiscoursePlan.",
+          "Tính toán tần suất xuất hiện gần đây của token đó và áp hình phạt trừ điểm (fatigue penalty).",
+          "Phân tích các n-gram trước đó để phát hiện nguy cơ lặp lại chuỗi (ví dụ: 'đi chơi đi chơi') và áp hình phạt trừ điểm rất nặng."
+        ]
+      }
+    ];
+
+    // 4. TAB CONTROLLER
+    function switchTab(tabId) {
+      // Update nav buttons
+      document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
+      const activeBtn = Array.from(document.querySelectorAll('.nav-btn')).find(btn => btn.innerText.toLowerCase().includes(tabNameMap(tabId)));
+      if (activeBtn) activeBtn.classList.add('active');
+
+      // Update contents
+      document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+      document.getElementById(`tab-${tabId}`).classList.add('active');
+
+      // Special initializations
+      if (tabId === 'simulator') {
+        initSimulatorView();
+      }
+    }
+
+    function tabNameMap(tabId) {
+      if (tabId === 'dashboard') return 'sơ đồ';
+      if (tabId === 'simulator') return 'luồng';
+      if (tabId === 'classes') return 'thành phần';
+      if (tabId === 'membio') return 'memory';
+      if (tabId === 'algorithms') return 'thuật toán';
+      return '';
+    }
+
+    // 5. PROFILE APPLIER FOR SYSTEM MAP
+    function applyProfile(profileId) {
+      // Update profile button active state
+      document.querySelectorAll('.profile-btn').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.getAttribute('onclick').includes(profileId)) {
+          btn.classList.add('active');
+        }
+      });
+
+      const infoText = document.getElementById('profile-info-text');
+
+      if (profileId === 'all') {
+        // Reset all nodes
+        document.querySelectorAll('.svg-node').forEach(node => node.classList.remove('dimmed'));
+        document.querySelectorAll('.svg-connector').forEach(conn => conn.classList.remove('dimmed'));
+        infoText.innerHTML = `Profile hiện tại: <span>Tất cả các thành phần</span>`;
+        return;
+      }
+
+      // Filter nodes in the SVG
+      document.querySelectorAll('.svg-node').forEach(node => {
+        const id = node.id.replace('node-', '');
+        const comp = componentsData.find(c => c.id === id);
+        if (comp && comp.profiles.includes(profileId)) {
+          node.classList.remove('dimmed');
+        } else {
+          node.classList.add('dimmed');
+        }
+      });
+
+      // Simple heuristic to dim connectors
+      document.querySelectorAll('.svg-connector').forEach(conn => {
+        if (profileId === 'native_fast') {
+          // Keep only core-synapse and bus-gen active
+          if (conn.id === 'conn-core-synapse' || conn.id === 'conn-bus-gen') {
+            conn.classList.remove('dimmed');
+          } else {
+            conn.classList.add('dimmed');
+          }
+        } else {
+          conn.classList.remove('dimmed');
+        }
+      });
+
+      const profileNames = {
+        full: "Full Profile (Tất cả 6 cơ chế sinh học + hệ thống phụ đầy đủ)",
+        native_fast: "Native Fast (Tăng tốc nhân C thưa, bỏ qua cơ chế sinh học phức tạp)",
+        bio_native: "Bio Native (Cơ chế sinh học kết hợp tăng tốc nhân C thưa)"
+      };
+
+      infoText.innerHTML = `Profile hiện tại: <span>${profileNames[profileId]}</span>`;
+    }
+
+    // 6. NODE INSPECTOR (SPOTLIGHT)
+    let selectedNodeId = null;
+
+    function inspectNode(nodeId) {
+      selectedNodeId = nodeId;
+      const comp = componentsData.find(c => c.id === nodeId);
+      
+      const badge = document.getElementById('inspect-badge');
+      const body = document.getElementById('inspect-body-content');
+      const actions = document.getElementById('inspect-actions-area');
+      
+      if (!comp) {
+        // Handle special nodes like "sparse_sdr_bus"
+        if (nodeId === 'sparse_sdr_bus') {
+          badge.innerText = "State Bus";
+          badge.style.background = "var(--accent-cyan-glow)";
+          badge.style.color = "var(--accent-cyan)";
+          
+          body.innerHTML = `
+            <div class="inspect-class-title">Sparse SDR Bus</div>
+            <div class="inspect-file-path">Shared State Container</div>
+            <p class="inspect-desc">Trực quan hóa đường truyền trạng thái thưa dùng chung trong LSL. Lưu trữ các bit hoạt động hiện thời và ma trận đồng xuất hiện giữa các đặc trưng nhị phân thưa.</p>
+            
+            <div class="inspect-section-title">Vai trò cốt lõi</div>
+            <ul class="relationship-list">
+              <li>Làm cầu nối trung chuyển dữ liệu nhị phân thưa (SDR) giữa lớp tính toán sinh học (Layer 2) và lớp các hệ thống bộ nhớ/suy luận/tạo sinh (Layer 3).</li>
+              <li>Hạn chế sự phụ thuộc chéo trực tiếp giữa các module, đảm bảo tính đóng gói của từng thành phần.</li>
+            </ul>
+          `;
+          actions.style.display = 'none';
+        }
+        return;
+      }
+      
+      // Update badge
+      badge.innerText = comp.badge;
+      const bgGlow = comp.layer === 'unified' ? 'var(--accent-orange-glow)' : 
+                     comp.layer === 'bio' ? 'var(--accent-green-glow)' : 
+                     comp.layer === 'memory' ? 'var(--accent-purple-glow)' : 
+                     comp.layer === 'reason' ? 'var(--accent-pink-glow)' : 'var(--accent-cyan-glow)';
+      const textCol = comp.layer === 'unified' ? 'var(--accent-orange)' : 
+                      comp.layer === 'bio' ? 'var(--accent-green)' : 
+                      comp.layer === 'memory' ? 'var(--accent-purple)' : 
+                      comp.layer === 'reason' ? 'var(--accent-pink)' : 'var(--accent-cyan)';
+      badge.style.background = bgGlow;
+      badge.style.color = textCol;
+
+      // Populate body
+      let relationshipsHTML = '';
+      comp.relationships.forEach(rel => {
+        relationshipsHTML += `<li>${rel}</li>`;
+      });
+
+      let targetGaugesHTML = '';
+      if (nodeId === 'local_predictive_stack') {
+        targetGaugesHTML = `
+          <div class="inspect-section-title">Chỉ tiêu thiết kế (Targets)</div>
+          <div class="metric-gauge-mini"><span class="metric-gauge-label">Tỷ lệ giảm sai số (Error Drop)</span><span class="metric-gauge-val">≥ 90%</span></div>
+          <div class="metric-gauge-mini"><span class="metric-gauge-label">Tỷ lệ ẩn tín hiệu (Suppression)</span><span class="metric-gauge-val">≥ 95%</span></div>
+        `;
+      } else if (nodeId === 'virtual_sparse_sdr') {
+        targetGaugesHTML = `
+          <div class="inspect-section-title">Chỉ tiêu thiết kế (Targets)</div>
+          <div class="metric-gauge-mini"><span class="metric-gauge-label">Dung lượng tổ hợp (Capacity)</span><span class="metric-gauge-val">≥ 2^500</span></div>
+          <div class="metric-gauge-mini"><span class="metric-gauge-label">Hoàn thiện mặt nạ thưa</span><span class="metric-gauge-val">≥ 80%</span></div>
+        `;
+      } else if (nodeId === 'cortical_column_sequence_memory') {
+        targetGaugesHTML = `
+          <div class="inspect-section-title">Chỉ tiêu thiết kế (Targets)</div>
+          <div class="metric-gauge-mini"><span class="metric-gauge-label">Hồi tưởng chuỗi (Sequence Recall)</span><span class="metric-gauge-val">100%</span></div>
+          <div class="metric-gauge-mini"><span class="metric-gauge-label">Độ chính xác ngữ pháp</span><span class="metric-gauge-val">≥ 95%</span></div>
+        `;
+      } else if (nodeId === 'hippocampal_memory') {
+        targetGaugesHTML = `
+          <div class="inspect-section-title">Chỉ tiêu thiết kế (Targets)</div>
+          <div class="metric-gauge-mini"><span class="metric-gauge-label">Lưu trữ sự kiện (Facts)</span><span class="metric-gauge-val">10,000</span></div>
+          <div class="metric-gauge-mini"><span class="metric-gauge-label">Tái hiện (Replay Budget)</span><span class="metric-gauge-val">≤ 10%</span></div>
+        `;
+      }
+
+      body.innerHTML = `
+        <div class="inspect-class-title">${comp.name}</div>
+        <div class="inspect-file-path">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><polyline points="13 2 13 9 20 9"></polyline></svg>
+          ${comp.file}
+        </div>
+        <p class="inspect-desc">${comp.description}</p>
+        
+        <div class="inspect-section-title">Quan hệ & Tương tác</div>
+        <ul class="relationship-list">
+          ${relationshipsHTML}
+        </ul>
+
+        ${targetGaugesHTML}
+      `;
+
+      // Show actions
+      actions.style.display = 'flex';
+      
+      // Update SVG node highlight border
+      document.querySelectorAll('.svg-node').forEach(node => {
+        const r = node.querySelector('rect');
+        if (node.id === `node-${nodeId}`) {
+          r.style.strokeWidth = '3px';
+          r.style.stroke = textCol;
+        } else {
+          r.style.strokeWidth = '1.5px';
+          r.style.stroke = '';
+        }
+      });
+    }
+
+    // 7. SOURCE SIGNATURE MODAL
+    function showSourceModal() {
+      if (!selectedNodeId) return;
+      const comp = componentsData.find(c => c.id === selectedNodeId);
+      if (!comp) return;
+
+      document.getElementById('modal-class-title').innerText = `Signature: class ${comp.name} (${comp.file})`;
+      
+      // Basic syntax highlight regex
+      let highlightedCode = comp.code
+        .replace(/class\b/g, '<span class="keyword">class</span>')
+        .replace(/def\b/g, '<span class="keyword">def</span>')
+        .replace(/self\b/g, '<span class="builtin">self</span>')
+        .replace(/(#.*)/g, '<span class="comment">$1</span>')
+        .replace(/(".*?")/g, '<span class="string">$1</span>')
+        .replace(/(List|Dict|Tuple|Optional|Set|Counter|np\.ndarray|BioComputeAgent|LivingSynapseLayer|LocalPredictiveStack|VirtualSparseSDR|CorticalColumnSequenceMemory|HippocampalMemory|BioNeuromodulator|DendriticLayer|LongContextMemory|WorldMemory|EntityEventGraph|ReasoningWorkspace|GenerationController|DiscoursePlan|DiscourseState|EvidenceAnswer|SymbolTable|DatasetSource|DatasetConfig|DatasetStats)/g, '<span class="typename">$1</span>');
+
+      document.getElementById('modal-code-display').innerHTML = highlightedCode;
+      document.getElementById('code-modal').style.display = 'flex';
+    }
+
+    function closeSourceModal() {
+      document.getElementById('code-modal').style.display = 'none';
+    }
+
+    function scrollToClassCard() {
+      if (!selectedNodeId) return;
+      switchTab('classes');
+      
+      // Filter out and focus
+      const card = document.getElementById(`card-${selectedNodeId}`);
+      if (card) {
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        card.style.borderColor = 'var(--accent-cyan)';
+        card.style.boxShadow = '0 0 16px var(--accent-cyan-glow)';
+        setTimeout(() => {
+          card.style.borderColor = '';
+          card.style.boxShadow = '';
+        }, 2000);
+      }
+    }
+
+    // 8. CLASSES EXPLORER LIST LOADING
+    function loadClassesList() {
+      const container = document.getElementById('classes-container');
+      container.innerHTML = '';
+
+      componentsData.forEach(comp => {
+        const card = document.createElement('div');
+        card.id = `card-${comp.id}`;
+        card.className = `class-card ${comp.layer}`;
+
+        let layerLabel = comp.layer === 'unified' ? 'Facade / Agent' : 
+                         comp.layer === 'bio' ? 'Biological Compute' : 
+                         comp.layer === 'memory' ? 'Memory Subsystem' : 
+                         comp.layer === 'reason' ? 'Reasoning Subsystem' : 'Synapse & SDR';
+
+        card.innerHTML = `
+          <div class="class-card-header">
+            <span class="class-card-layer">${layerLabel}</span>
+            <div class="class-card-title">${comp.name}</div>
+            <div class="class-card-file">${comp.file}</div>
+          </div>
+          <div class="class-card-body">
+            ${comp.description}
+          </div>
+          <div class="class-card-actions">
+            <button class="card-btn" onclick="inspectNodeFromCard('${comp.id}')">Xem Sơ Đồ</button>
+            <button class="card-btn primary" onclick="showSourceModalFromCard('${comp.id}')">Python Spec</button>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    function inspectNodeFromCard(id) {
+      switchTab('dashboard');
+      inspectNode(id);
+    }
+
+    function showSourceModalFromCard(id) {
+      selectedNodeId = id;
+      showSourceModal();
+    }
+
+    function filterClasses() {
+      const query = document.getElementById('class-search-input').value.toLowerCase();
+      document.querySelectorAll('.class-card').forEach(card => {
+        const title = card.querySelector('.class-card-title').innerText.toLowerCase();
+        const desc = card.querySelector('.class-card-body').innerText.toLowerCase();
+        if (title.includes(query) || desc.includes(query)) {
+          card.style.display = 'flex';
+        } else {
+          card.style.display = 'none';
+        }
+      });
+    }
+
+    function filterLayer(layer) {
+      document.querySelectorAll('.layer-tag').forEach(tag => tag.classList.remove('active'));
+      const activeTag = Array.from(document.querySelectorAll('.layer-tag')).find(tag => tag.getAttribute('data-layer') === layer);
+      if (activeTag) activeTag.classList.add('active');
+
+      document.querySelectorAll('.class-card').forEach(card => {
+        if (layer === 'all' || card.classList.contains(layer)) {
+          card.style.display = 'flex';
+        } else {
+          card.style.display = 'none';
+        }
+      });
+    }
+
+    // 9. SIMULATOR LOGIC
+    let currentFlowId = 'train';
+    let currentStepIndex = 0;
+    let simInterval = null;
+    let isSimPlaying = false;
+
+    function initSimulatorView() {
+      // Put system map SVG clone in simulator viewport
+      const mapContainer = document.getElementById('sim-svg-container');
+      mapContainer.innerHTML = '';
+      
+      const originalSvg = document.querySelector('svg.architecture-map');
+      const clone = originalSvg.cloneNode(true);
+      clone.removeAttribute('id');
+      
+      // Clean up styles/events in clone
+      clone.querySelectorAll('.svg-node').forEach(node => {
+        node.removeAttribute('onclick');
+        node.style.cursor = 'default';
+      });
+      
+      mapContainer.appendChild(clone);
+      
+      // Setup current flow
+      loadFlow(currentFlowId);
+    }
+
+    function loadFlow(flowId) {
+      currentFlowId = flowId;
+      currentStepIndex = 0;
+      stopSimPlayback();
+
+      // Update flow selector buttons
+      document.querySelectorAll('.sim-select-btn').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.getAttribute('onclick').includes(flowId)) {
+          btn.classList.add('active');
+        }
+      });
+
+      const flow = flows[flowId];
+      document.getElementById('sim-flow-title-text').innerText = flow.title;
+
+      // Populate timeline items
+      const timeline = document.getElementById('sim-timeline');
+      timeline.innerHTML = '';
+
+      flow.steps.forEach((step, idx) => {
+        const item = document.createElement('div');
+        item.className = `sim-step-item ${idx === 0 ? 'active' : ''}`;
+        item.setAttribute('onclick', `jumpToSimStep(${idx})`);
+        
+        item.innerHTML = `
+          <div class="sim-step-dot"></div>
+          <div class="sim-step-num">BƯỚC ${step.num}</div>
+          <div class="sim-step-name">${step.name}</div>
+          <div class="sim-step-desc">${step.desc}</div>
+        `;
+        timeline.appendChild(item);
+      });
+
+      highlightActiveStep();
+    }
+
+    function highlightActiveStep() {
+      const flow = flows[currentFlowId];
+      const step = flow.steps[currentStepIndex];
+
+      // Update timeline HTML state
+      const items = document.querySelectorAll('.sim-step-item');
+      items.forEach((item, idx) => {
+        if (idx === currentStepIndex) {
+          item.classList.add('active');
+          item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        } else {
+          item.classList.remove('active');
+        }
+      });
+
+      // Update simulator SVG highlights
+      const simSvg = document.querySelector('#sim-svg-container svg');
+      if (simSvg) {
+        // Dim all
+        simSvg.querySelectorAll('.svg-node').forEach(node => node.classList.add('dimmed'));
+        simSvg.querySelectorAll('.svg-connector').forEach(conn => {
+          conn.classList.add('dimmed');
+          conn.classList.remove('active');
+        });
+
+        // Light up active nodes in this step
+        step.nodes.forEach(nodeId => {
+          const simNode = simSvg.querySelector(`#node-${nodeId}`);
+          if (simNode) {
+            simNode.classList.remove('dimmed');
+            // Give a little visual cue
+            const r = simNode.querySelector('rect');
+            r.style.strokeWidth = '3px';
+            setTimeout(() => {
+              r.style.strokeWidth = '';
+            }, 500);
+          }
+        });
+
+        // Heuristically animate flow indicators
+        if (currentStepIndex > 0) {
+          const prevStep = flow.steps[currentStepIndex - 1];
+          // animate active link
+          if (step.nodes.includes('virtual_sparse_sdr') || step.nodes.includes('local_predictive_stack')) {
+            const agentBus = simSvg.querySelector('#conn-agent-bus');
+            if (agentBus) {
+              agentBus.classList.remove('dimmed');
+              agentBus.classList.add('active');
+            }
+          }
+          if (step.nodes.includes('long_context_memory') || step.nodes.includes('world_memory')) {
+            const busMem = simSvg.querySelector('#conn-bus-mem');
+            if (busMem) {
+              busMem.classList.remove('dimmed');
+              busMem.classList.add('active');
+            }
+          }
+        }
+      }
+    }
+
+    function simNextStep() {
+      const flow = flows[currentFlowId];
+      if (currentStepIndex < flow.steps.length - 1) {
+        currentStepIndex++;
+      } else {
+        currentStepIndex = 0; // loop
+      }
+      highlightActiveStep();
+    }
+
+    function simPrevStep() {
+      if (currentStepIndex > 0) {
+        currentStepIndex--;
+      } else {
+        const flow = flows[currentFlowId];
+        currentStepIndex = flow.steps.length - 1;
+      }
+      highlightActiveStep();
+    }
+
+    function jumpToSimStep(idx) {
+      currentStepIndex = idx;
+      stopSimPlayback();
+      highlightActiveStep();
+    }
+
+    function toggleSimPlay() {
+      if (isSimPlaying) {
+        stopSimPlayback();
+      } else {
+        startSimPlayback();
+      }
+    }
+
+    function startSimPlayback() {
+      isSimPlaying = true;
+      document.getElementById('sim-play-trigger').innerText = '⏸';
+      simInterval = setInterval(() => {
+        simNextStep();
+      }, 3500); // 3.5 seconds per step
+    }
+
+    function stopSimPlayback() {
+      isSimPlaying = false;
+      document.getElementById('sim-play-trigger').innerText = '▶';
+      if (simInterval) {
+        clearInterval(simInterval);
+        simInterval = null;
+      }
+    }
+
+    // 10. ALGORITHM LOADER
+    function loadAlgorithm(idx) {
+      // Update sidebar active buttons
+      document.querySelectorAll('.algo-list-btn').forEach((btn, buttonIdx) => {
+        if (buttonIdx === idx) {
+          btn.classList.add('active');
+        } else {
+          btn.classList.remove('active');
+        }
+      });
+
+      const algo = algorithmsData[idx];
+      document.getElementById('algo-title-text').innerText = algo.title;
+      document.getElementById('algo-complexity-text').innerText = algo.complexity;
+      document.getElementById('algo-explain-desc').innerText = algo.desc;
+
+      // Populate steps
+      const stepsList = document.getElementById('algo-steps-display');
+      stepsList.innerHTML = '';
+      algo.steps.forEach((step, stepIdx) => {
+        const li = document.createElement('li');
+        li.setAttribute('data-step', stepIdx + 1);
+        li.innerText = step;
+        stepsList.appendChild(li);
+      });
+
+      // Highlight code
+      let highlightedCode = algo.code
+        .replace(/class\b/g, '<span class="keyword">class</span>')
+        .replace(/def\b/g, '<span class="keyword">def</span>')
+        .replace(/self\b/g, '<span class="builtin">self</span>')
+        .replace(/(#.*)/g, '<span class="comment">$1</span>')
+        .replace(/(".*?")/g, '<span class="string">$1</span>')
+        .replace(/(List|Dict|Tuple|Optional|Set|Counter|np\.ndarray|BioComputeAgent|LivingSynapseLayer|LocalPredictiveStack|VirtualSparseSDR|CorticalColumnSequenceMemory|HippocampalMemory|BioNeuromodulator|DendriticLayer|LongContextMemory|WorldMemory|EntityEventGraph|ReasoningWorkspace|GenerationController|DiscoursePlan|DiscourseState|EvidenceAnswer)/g, '<span class="typename">$1</span>');
+
+      document.getElementById('algo-code-display').innerHTML = highlightedCode;
+    }
+
+    // 11. MEMORY STACK TIER CLICK ACTIONS
+    function highlightMemoryTier(tierId) {
+      // Find matching component ids for each memory tier
+      const mapping = {
+        working: ["reasoning_workspace"],
+        episodic: ["hippocampal_memory"],
+        semantic: ["long_context_memory", "world_memory", "sparse_key_value_memory", "relation_memory", "role_binding_memory", "entity_event_graph"],
+        consolidated: ["living_synapse_layer"]
+      };
+
+      // Switch to dashboard and inspect the first matching element
+      switchTab('dashboard');
+      const nodeToInspect = mapping[tierId][0];
+      inspectNode(nodeToInspect);
+    }
+
+    // ON PAGE LOAD INITIALIZATION
+    window.onload = function() {
+      // Load classes grid
+      loadClassesList();
+      
+      // Load default algorithm
+      loadAlgorithm(0);
+      
+      // Default node spotlight select
+      inspectNode('lsl_core_model');
+    }
+  </script>
+</body>
+</html>

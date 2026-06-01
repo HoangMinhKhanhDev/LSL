@@ -21,7 +21,7 @@ from benchmarks.competitive.run_lsl_vs_transformer import (  # noqa: E402
     model_size_bytes,
     transformer_eval,
 )
-from lsl import DatasetLoader, LSLCoreModel, write_result  # noqa: E402
+from lsl import DatasetLoader, LSLCoreModel, RUNTIME_PROFILE_CHOICES, write_result  # noqa: E402
 
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -222,7 +222,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--token-budgets", type=str, default="1000000,10000000")
     parser.add_argument("--vocab-sizes", type=str, default="1000,4000")
     parser.add_argument("--seeds", type=str, default="42,43,44,45,46")
-    parser.add_argument("--lsl-profile", choices=["full", "native_long_context", "native_fast", "bio_native"], default="native_fast")
+    parser.add_argument("--lsl-profile", choices=list(RUNTIME_PROFILE_CHOICES), default="native_fast")
     parser.add_argument("--candidate-cap", type=int, default=128)
     parser.add_argument("--eval-tokens", type=int, default=2000)
     parser.add_argument("--max-train-chars", type=int, default=None)

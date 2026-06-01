@@ -14,9 +14,29 @@ supporting scripts.
 - `README.md`: quick start and strict verification summary
 - `run_all.py`: umbrella runner for the strict suite
 - `lsl_chat.py`: interactive checkpoint demo for `LSLCoreModel`
+- `lsl_cli.py`: unified `train` / `eval` / `chat` / `report` entrypoint
+- `train_curriculum.py`: 3-stage bootstrap/broaden/adapt curriculum runner
+- `docs/LSL_TRAINING_GUIDE.md`: scratch/resume/scale workflow for the unified model
+- `lsl_web_demo.py`: local HTTP demo for chat, diagnostics, and report links
+- `lsl_report.py`: HTML benchmark report generator
 - `benchmark_*.py`: thin compatibility wrappers for the benchmark package
 - `test_*`: unit and integration coverage
 - `demo_*`, `trace_*`, `verify_*`: exploratory scripts and proofs
+
+## `docs/`
+
+Documentation and architecture notes:
+
+- `LSL_MODEL_CARD.md`: model card and intended-use summary
+- `LSL_TECHNICAL_REPORT.md`: technical report for the core mechanisms
+- `LSL_COMPARISONS.md`: comparison snapshots against the CPU Transformer baseline
+- `ARCHITECTURE.md`: architecture overview
+- `DEVELOPMENT.md`: contribution and development workflow
+- `FAQ.md`: common questions and troubleshooting
+- `INSTALLATION.md`: setup and environment notes
+- `PERFORMANCE.md`: profiling and optimization notes
+- `TESTING.md`: test and benchmark guidance
+- `USAGE.md`: day-to-day usage notes
 
 ## `benchmarks/`
 
@@ -34,7 +54,9 @@ Canonical benchmark implementations grouped by purpose:
 - `phase9/`: biological compute closure checks for predictive coding, SDR, cortical columns, hippocampus, neuromodulation, dendrites, and integrated ablations
 - `competitive/`: single-model LSLCoreModel vs CPU NumPy Transformer comparisons
 - `train_lsl_corpus.py`: real-corpus trainer that writes an `LSLCoreModel` checkpoint
+- `curriculum.py`: three-stage continual-learning curriculum runner
 - `strict/`: canonical 18-goal verification suite
+- `energy/`: real power-sensor adapters and native sparse-kernel watt evidence capture
 - `misc/`: supporting experiments and older auxiliary benchmarks
 
 ## `lsl/`
@@ -52,8 +74,12 @@ Core package code:
 - `prior.py`: optional offline semantic prior
 - `agent.py`: integrated strict-path agent
 - `core.py`: unified `LSLCoreModel` API for train/evaluate/generate/save/load,
-  including `native_fast` throughput and `bio_native` six-mechanism profiles
+  including `native_fast` throughput and `bio_native` / `continual` six-mechanism profiles
+- `curriculum.py`: three-stage training curriculum utilities and CLI helpers
 - `bio.py`: Phase 9 biological compute primitives and `BioComputeAgent`
+- `cli.py`: unified command-line dispatcher for train/eval/chat/report
+- `report.py`: HTML benchmark report generation from stored results
+- `web_demo.py`: local HTTP chat/demo server
 - `hierarchy.py`: learned hierarchy/routing memory
 - `synapse.py`: sparse living synapse primitive
 - `sdr.py` and `semantic_sdr.py`: sparse binary representation utilities

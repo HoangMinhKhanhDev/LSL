@@ -13,7 +13,7 @@ from .workspace import EntityEventGraph, ReasoningWorkspace, WorkspaceStep
 from .event_ssm import EventDrivenSSM
 from .prior import OfflinePriorSDR
 from .agent import IntegratedLSLAgent
-from .core import LSLCoreConfig, LSLCoreModel
+from .core import LSLCoreConfig, LSLCoreModel, RUNTIME_PROFILE_CHOICES
 from .bio import (
     BioComputeAgent,
     BioNeuromodulator,
@@ -32,6 +32,7 @@ from .text_normalization import looks_vietnamese, normalize_text, repair_utf8_mo
 from .checkpoint import append_checkpoint, load_checkpoint, migrate_checkpoint, save_checkpoint
 from .dataset_loader import DatasetConfig, DatasetLoader, DatasetSource, DatasetStats, DatasetTextSplits
 from .results import run_metadata, write_result
+from .report import render_html_report, write_html_report
 from .sdr import (
     SDREncoder,
     hamming_overlap,
@@ -81,6 +82,7 @@ __all__ = [
     "IntegratedLSLAgent",
     "LSLCoreConfig",
     "LSLCoreModel",
+    "RUNTIME_PROFILE_CHOICES",
     "BioComputeAgent",
     "BioNeuromodulator",
     "DendriticLayer",
@@ -107,6 +109,8 @@ __all__ = [
     "DatasetTextSplits",
     "run_metadata",
     "write_result",
+    "render_html_report",
+    "write_html_report",
     "SDREncoder",
     "hamming_overlap",
     "pairwise_overlap_matrix",

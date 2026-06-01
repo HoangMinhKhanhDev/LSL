@@ -45,7 +45,25 @@ strict gate:
 python run_all.py
 ```
 
-For a concise map of the repo, see [docs/PROJECT_LAYOUT.md](/F:/brain/docs/PROJECT_LAYOUT.md).
+For a concise map of the repo, see [docs/PROJECT_LAYOUT.md](docs/PROJECT_LAYOUT.md).
+
+## Unified Entry Points
+
+Use the consolidated command wrappers for day-to-day work:
+
+```bash
+python lsl_cli.py train --dataset tinystories
+python lsl_cli.py eval --dataset tinystories --tokens 100000
+python lsl_cli.py chat --checkpoint checkpoints/lsl_tinystories.json
+python lsl_report.py --output results/lsl_report.html
+python lsl_web_demo.py --port 8000
+```
+
+The model card and technical report live in:
+
+- [docs/LSL_MODEL_CARD.md](docs/LSL_MODEL_CARD.md)
+- [docs/LSL_TECHNICAL_REPORT.md](docs/LSL_TECHNICAL_REPORT.md)
+- [docs/LSL_COMPARISONS.md](docs/LSL_COMPARISONS.md)
 
 Moonshot v5.0 extends the strict 18-goal suite into competitive-small-model
 mechanism tests:
@@ -114,9 +132,17 @@ python benchmarks/competitive/run_lsl_vs_transformer.py --dataset wikitext2 --to
 By default this is descriptive, not a strict claim gate. Add `--claim` to make
 the configured quality/latency/generation thresholds fail the command.
 Use `--lsl-profile native_fast` for maximum C-kernel throughput and
-`--lsl-profile bio_native` when you want one stream to engage the six biological
-mechanisms together: predictive coding, SDR, cortical columns, hippocampal
-replay, neuromodulation, and dendritic computation.
+`--lsl-profile bio_native` or `--lsl-profile continual` when you want one stream
+to engage the six biological mechanisms together: predictive coding, SDR,
+cortical columns, hippocampal replay, neuromodulation, and dendritic
+computation.
+
+For a single place to learn how to train from scratch, resume from a
+checkpoint, and scale to larger corpora, see
+[docs/LSL_TRAINING_GUIDE.md](docs/LSL_TRAINING_GUIDE.md).
+
+For current benchmark snapshots and methodology notes, see
+[docs/LSL_COMPARISONS.md](docs/LSL_COMPARISONS.md).
 
 Train and save a single LSLCoreModel checkpoint on a real corpus:
 
@@ -124,12 +150,32 @@ Train and save a single LSLCoreModel checkpoint on a real corpus:
 python benchmarks/train_lsl_corpus.py --dataset tinystories --max-tokens 1000000 --lsl-profile native_fast
 ```
 
+Run the 3-stage curriculum from a base checkpoint into continual adaptation:
+
+```bash
+python train_curriculum.py
+python lsl_cli.py curriculum
+python train_curriculum.py --load-checkpoint checkpoints\lsl_tinystories.json --adapt-dataset custom --adapt-corpus-path F:\data\new_domain.txt
+python train_curriculum.py --preset grammar_safe --load-checkpoint checkpoints\lsl_tinystories.json
+python train_curriculum.py --preset scale_ready --load-checkpoint checkpoints\lsl_tinystories.json
+```
+
+The `scale_ready` lane splits stage 3 into smaller continual-adaptation sub-stages and reports the
+retention / grammar / throughput / OOD promotion gate directly. It will stay non-green until that
+gate is actually met, which is the intended signal before any larger scale-up.
+
+Resume from an existing checkpoint on new data:
+
+```bash
+python lsl_cli.py train --dataset custom --corpus-path F:\data\new_domain.txt --load-checkpoint checkpoints\base.json --lsl-profile continual --checkpoint checkpoints\base_plus_domain.json
+```
+
 Then run the interactive demo. On a fresh checkout, `python lsl_chat.py` also
 bootstraps a small local TinyStories checkpoint automatically if this file is
 missing:
 
 ```bash
-python lsl_chat.py --checkpoint checkpoints/lsl_tinystories.json --lsl-profile bio_native
+python lsl_chat.py --checkpoint checkpoints/lsl_tinystories.json --lsl-profile continual
 ```
 
 The chat path uses the native C sparse transition head when

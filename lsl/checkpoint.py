@@ -15,6 +15,7 @@ from typing import Any, Dict, Optional, Tuple
 
 FRAME_MAGIC = b"LSLCKPT2"
 CHECKPOINT_VERSION = 2
+FAST_TAIL_BYTES = 4 * 1024 * 1024
 
 
 def _now_utc() -> str:
@@ -46,21 +47,47 @@ def _iter_frames(data: bytes):
         offset = payload_end
 
 
+def _parse_last_frame(data: bytes):
+    if not data:
+        return None
+    idx = data.rfind(FRAME_MAGIC)
+    if idx < 0:
+        return None
+    offset = idx + len(FRAME_MAGIC)
+    if offset + 16 > len(data):
+        return None
+    header_len, payload_len = struct.unpack("<QQ", data[offset: offset + 16])
+    header_start = offset + 16
+    header_end = header_start + int(header_len)
+    payload_end = header_end + int(payload_len)
+    if payload_end > len(data):
+        return None
+    header = json.loads(data[header_start:header_end].decode("utf-8"))
+    payload = data[header_end:payload_end]
+    return header, payload
+
+
 def checkpoint_frame(
     obj: Any,
     *,
-    compression_level: int = 9,
+    compression_level: int = 3,
     mode: str = "full",
     parent: Optional[str] = None,
     extra: Optional[Dict[str, Any]] = None,
 ) -> Tuple[bytes, Dict[str, Any]]:
     raw = pickle.dumps(obj, protocol=pickle.HIGHEST_PROTOCOL)
-    compressed = zlib.compress(raw, int(compression_level))
+    level = int(compression_level)
+    if level <= 0:
+        compressed = raw
+        compression_name = "raw"
+    else:
+        compressed = zlib.compress(raw, level)
+        compression_name = "zlib"
     header: Dict[str, Any] = {
         "format": "LSLCoreModelBinary",
         "version": CHECKPOINT_VERSION,
         "mode": str(mode),
-        "compression": "zlib",
+        "compression": compression_name,
         "timestamp": _now_utc(),
         "raw_bytes": len(raw),
         "payload_bytes": len(compressed),
@@ -78,7 +105,7 @@ def save_checkpoint(
     obj: Any,
     path: str,
     *,
-    compression_level: int = 9,
+    compression_level: int = 3,
     mode: str = "full",
     parent: Optional[str] = None,
     extra: Optional[Dict[str, Any]] = None,
@@ -104,7 +131,7 @@ def append_checkpoint(
     obj: Any,
     path: str,
     *,
-    compression_level: int = 9,
+    compression_level: int = 3,
     parent: Optional[str] = None,
     extra: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
@@ -127,20 +154,39 @@ def append_checkpoint(
 
 def load_checkpoint(path: str) -> Any:
     with open(path, "rb") as f:
-        data = f.read()
-    if not data.startswith(FRAME_MAGIC):
-        return pickle.loads(data)
+        prefix = f.read(len(FRAME_MAGIC))
+    if prefix != FRAME_MAGIC:
+        with open(path, "rb") as f:
+            return pickle.loads(f.read())
+    size = os.path.getsize(path)
+    if size <= 0:
+        raise ValueError("Empty LSL checkpoint")
+    tail_size = min(size, FAST_TAIL_BYTES)
     last_header = None
     last_payload = None
-    for header, payload in _iter_frames(data):
-        last_header = header
-        last_payload = payload
+    if tail_size > 0:
+        with open(path, "rb") as f:
+            f.seek(size - tail_size)
+            tail = f.read(tail_size)
+        parsed = _parse_last_frame(tail)
+        if parsed is not None:
+            last_header, last_payload = parsed
     if last_payload is None or last_header is None:
-        raise ValueError("Empty LSL checkpoint")
+        with open(path, "rb") as f:
+            data = f.read()
+        if not data.startswith(FRAME_MAGIC):
+            return pickle.loads(data)
+        for header, payload in _iter_frames(data):
+            last_header = header
+            last_payload = payload
+        if last_payload is None or last_header is None:
+            raise ValueError("Empty LSL checkpoint")
     if hashlib.sha256(last_payload).hexdigest() != last_header.get("payload_sha256"):
         raise ValueError("LSL checkpoint payload hash mismatch")
     if last_header.get("compression") == "zlib":
         raw = zlib.decompress(last_payload)
+    elif last_header.get("compression") == "raw":
+        raw = last_payload
     else:
         raw = last_payload
     if hashlib.sha256(raw).hexdigest() != last_header.get("raw_sha256"):

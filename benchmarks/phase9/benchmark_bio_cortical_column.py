@@ -51,6 +51,7 @@ def evaluate(args):
         seen_total += 2
         grammar_correct += int(pred_v in verbs) + int(pred_o in objects)
         grammar_total += 2
+    pre_prune_confidence = memory.metrics()["prediction_confidence"]
 
     generated = [long_topic[0]]
     memory.reset_state()
@@ -78,14 +79,35 @@ def evaluate(args):
     sparse_ops = args.tokens_for_energy * memory.k
     transformer_ops = args.tokens_for_energy * args.tokens_for_energy * vocab_size
     energy_proxy = transformer_ops / max(1.0, sparse_ops)
+    segment_limit = max(1, len(memory.temporal_segments) - max(1, len(memory.temporal_segments) // 10))
+    if segment_limit >= len(memory.temporal_segments):
+        segment_limit = max(1, len(memory.temporal_segments) - 1)
+    pruned_segments = memory.prune_memory(
+        max_segments=segment_limit,
+        max_context_keys=max(4, len(memory.context_transitions) - max(1, len(memory.context_transitions) // 10)),
+        max_targets_per_context=8,
+    )
+    post_prune_seen = 0
+    post_prune_grammar = 0
+    for seq in sequences:
+        pred_v = next_prediction(memory, seq[:1])
+        pred_o = next_prediction(memory, seq[:2])
+        post_prune_seen += int(pred_v == seq[1]) + int(pred_o == seq[2])
+        post_prune_grammar += int(pred_v in verbs) + int(pred_o in objects)
+    post_prune_confidence = memory.metrics()["prediction_confidence"]
 
     metrics = {
         "seen_recall": seen_correct / max(1, seen_total),
         "grammar_accuracy": grammar_correct / max(1, grammar_total),
+        "post_prune_seen_recall": post_prune_seen / max(1, seen_total),
+        "post_prune_grammar_accuracy": post_prune_grammar / max(1, grammar_total),
         "topic_coherence_200": topic_coherence,
         "latency_ratio_1000_vs_10": latency_ratio,
         "burst_energy_proxy": energy_proxy,
         "suppression_rate": memory.metrics()["suppression_rate"],
+        "prediction_confidence": pre_prune_confidence,
+        "post_prune_prediction_confidence": post_prune_confidence,
+        "pruned_segments": float(pruned_segments),
     }
     checks = {
         "seen_recall": metrics["seen_recall"] >= args.seen_target,
@@ -93,6 +115,8 @@ def evaluate(args):
         "coherence": metrics["topic_coherence_200"] >= args.coherence_target,
         "latency": metrics["latency_ratio_1000_vs_10"] <= args.latency_ratio_target,
         "energy": metrics["burst_energy_proxy"] >= args.energy_target,
+        "prune": metrics["pruned_segments"] >= args.prune_target,
+        "post_prune_grammar": metrics["post_prune_grammar_accuracy"] >= args.prune_grammar_target,
     }
     return {"success": all(checks.values()), "checks": checks, "metrics": metrics}
 
@@ -104,6 +128,8 @@ def parse_args():
     parser.add_argument("--coherence-target", type=float, default=0.50)
     parser.add_argument("--latency-ratio-target", type=float, default=1.5)
     parser.add_argument("--energy-target", type=float, default=100.0)
+    parser.add_argument("--prune-target", type=float, default=1.0)
+    parser.add_argument("--prune-grammar-target", type=float, default=0.90)
     parser.add_argument("--tokens-for-energy", type=int, default=1000)
     parser.add_argument("--json-output", type=str, default=None)
     parser.add_argument("--seed", type=int, default=42)

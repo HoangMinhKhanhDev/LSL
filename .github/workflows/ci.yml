@@ -1,0 +1,43 @@
+name: lsl-ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+
+      - name: Build native extension
+        run: python setup.py build_ext --inplace
+
+      - name: Core regressions
+        run: |
+          python test_lsl_limitations_improvements.py
+          python test_tokenizer_checkpoint_native.py
+          python test_native_kernels.py
+          python test_regression_speed_quality.py
+
+      - name: Strict smoke
+        run: python benchmark_goal_strict.py --profile smoke
+
+      - name: Phase 9 quick
+        run: python benchmarks/phase9/run_phase9.py --profile quick
+
+      - name: Competitive smoke
+        run: python benchmarks/competitive/run_lsl_vs_transformer.py --dataset tinystories --tokens 2000
+
+      - name: Render report
+        run: python lsl_report.py --output results/ci_report.html
+

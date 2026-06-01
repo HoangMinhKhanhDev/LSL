@@ -135,12 +135,32 @@ It reports language loss/perplexity, accuracy, latency, train time, model-size
 proxy, generation metrics, and online adaptation for one unified LSLCoreModel
 against a trainable NumPy Transformer on the same token stream. It also reports
 context-latency rows, QA/fact recall, and latency/ops energy proxies.
+Current benchmark snapshots and methodology notes are collected in
+[docs/LSL_COMPARISONS.md](../docs/LSL_COMPARISONS.md).
 
 Corpus checkpoint training:
 
 ```bash
 python benchmarks/train_lsl_corpus.py --dataset tinystories --max-tokens 1000000 --lsl-profile native_fast
-python lsl_chat.py --checkpoint checkpoints/lsl_tinystories.json --lsl-profile bio_native
+python lsl_chat.py --checkpoint checkpoints/lsl_tinystories.json --lsl-profile continual
+python train_curriculum.py --load-checkpoint checkpoints/lsl_tinystories.json --adapt-dataset custom --adapt-corpus-path F:\data\new_domain.txt
+```
+
+The `scale_ready` curriculum lane is the promotion gate. It splits stage 3
+into smaller adaptation chunks and returns a non-zero exit until the
+retention / grammar / throughput / OOD gate actually passes.
+
+See [docs/LSL_TRAINING_GUIDE.md](../docs/LSL_TRAINING_GUIDE.md) for the
+scratch/resume/scale workflow in one place.
+
+Unified CLI and report generation:
+
+```bash
+python lsl_cli.py train --dataset tinystories
+python lsl_cli.py eval --dataset tinystories --tokens 100000
+python lsl_cli.py chat --checkpoint checkpoints/lsl_tinystories.json
+python lsl_report.py --output results/lsl_report.html
+python lsl_web_demo.py --port 8000
 ```
 
 Phase 1 training foundation:
@@ -180,5 +200,5 @@ If the default checkpoint is absent, `lsl_chat.py` bootstraps a small local
 TinyStories checkpoint before entering the chat loop.
 When the native extension is built, chat generation is routed through the C
 sparse transition head; `/diag` reports native forward/update ratios.
-Use `native_fast` for throughput claims and `bio_native` to run the six
-biological mechanisms in one integrated stream.
+Use `native_fast` for throughput claims and `bio_native` / `continual` to run
+the six biological mechanisms in one integrated stream.

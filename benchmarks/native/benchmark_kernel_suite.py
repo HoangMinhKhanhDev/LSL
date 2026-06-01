@@ -5,6 +5,7 @@ import argparse
 import os
 import re
 import sys
+import tempfile
 import time
 from typing import Dict, List
 
@@ -12,7 +13,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from lsl import DatasetLoader, DendriticLayer, SimpleSubwordTokenizer, write_result  # noqa: E402
+from lsl import DatasetLoader, DendriticLayer, LSLCoreModel, SimpleSubwordTokenizer, write_result  # noqa: E402
 from lsl.memory import SparseKeyValueMemory  # noqa: E402
 from lsl.cortical_column import CorticalColumnSequenceMemory  # noqa: E402
 from lsl import sparse_native  # noqa: E402
@@ -198,6 +199,39 @@ def benchmark_cortical_topk(length: int, top_k: int, repeats: int) -> Dict[str, 
     }
 
 
+def benchmark_checkpoint_io(text: str, repeats: int = 3) -> Dict[str, object]:
+    model = LSLCoreModel(vocab_size=512, runtime_profile="native_fast", seed=0)
+    model.train_stream([text[:20000]], max_tokens=4096)
+    save_seconds = []
+    load_seconds = []
+    compression_ratios = []
+    file_bytes = 0
+    with tempfile.TemporaryDirectory() as raw:
+        path = os.path.join(raw, "checkpoint.lslb")
+        for _ in range(repeats):
+            _, save_elapsed = timed(lambda: model.save_binary(path))
+            save_seconds.append(save_elapsed)
+            file_bytes = os.path.getsize(path)
+            compression_ratios.append(float(model.last_checkpoint_info.get("compression_ratio", 1.0)))
+            _, load_elapsed = timed(lambda: LSLCoreModel.load(path))
+            load_seconds.append(load_elapsed)
+    avg_save = sum(save_seconds) / max(1, len(save_seconds))
+    avg_load = sum(load_seconds) / max(1, len(load_seconds))
+    save_gbps = bytes_to_gb_per_s(file_bytes, avg_save)
+    load_gbps = bytes_to_gb_per_s(file_bytes, avg_load)
+    return {
+        "mechanism": "checkpoint_binary_io",
+        "save_seconds": float(avg_save),
+        "load_seconds": float(avg_load),
+        "save_mb_s": save_gbps * 1000.0,
+        "load_mb_s": load_gbps * 1000.0,
+        "bandwidth_gbps": float((save_gbps + load_gbps) / 2.0),
+        "file_bytes": float(file_bytes),
+        "compression_ratio": float(sum(compression_ratios) / max(1, len(compression_ratios))),
+        "runtime_profile": model.runtime_profile(),
+    }
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dataset", type=str, default="vietnamese_small")
@@ -232,6 +266,7 @@ def main() -> int:
         benchmark_sparse_batch(int(args.batch_size), int(args.out_dim), int(args.in_dim), int(args.active_count), int(args.repeats)),
         benchmark_dendrite(int(args.dendrite_branches), int(args.dendrite_active_bits), int(args.dendrite_outputs), int(args.repeats)),
         benchmark_cortical_topk(int(args.cortical_length), int(args.cortical_topk), int(args.repeats)),
+        benchmark_checkpoint_io(text),
     ]
     payload = {
         "benchmark": "native_kernel_suite",

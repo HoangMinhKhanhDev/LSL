@@ -105,9 +105,10 @@ def evaluate(args):
     specialization_samples = []
     for i in range(32):
         bits = [200 + i * 8 + j for j in range(4)]
-        specialized.add_branch(bits, output=1, threshold=3.5)
+        specialized.grow_branch(bits, output=1, threshold=3.5)
         specialization_samples.append(bits)
     branch_overlap = specialized.branch_activity_overlap(specialization_samples)
+    growth_diag = specialized.diagnostics()
 
     tree = DendriticLayer(
         input_dim=args.tree_input_dim,
@@ -147,11 +148,14 @@ def evaluate(args):
         "coincidence_detection_accuracy": coincidence_accuracy(),
         "xor_one_neuron_accuracy": xor_one_neuron_accuracy(),
         "flat_single_neuron_xor_possible": float(flat_single_threshold_can_solve_xor()),
+        "branch_growth_events": growth_diag["branch_growth_events"],
         "tree_branches_per_neuron": tree_diag["branches_per_neuron"],
+        "tree_candidate_branch_ratio": tree_diag["last_candidate_branch_ratio"],
         "branch_level_sdr_unique_ratio": unique_receptive_fields / max(1, len(tree.branches)),
         "tree_mean_branch_size": tree_diag["mean_branch_size"],
         "sparse_branch_activation_ratio": tree_diag["last_active_branch_ratio"],
         "tree_compute_density_gain": tree_diag["compute_density_gain"],
+        "tree_native_predict_ratio": tree_diag["native_predict_ratio"],
         "branch_local_learning_ratio": branch_local_learning_ratio,
         "global_error_updates": learn_diag["global_error_updates"],
         "zero_update_branch_ratio": zero_update_ratio,
@@ -166,6 +170,7 @@ def evaluate(args):
         "g6_3_coincidence": metrics["coincidence_detection_accuracy"] >= args.coincidence_target,
         "g6_4_xor": metrics["xor_one_neuron_accuracy"] >= args.xor_target and metrics["flat_single_neuron_xor_possible"] == 0.0,
         "g6_5_sparse_branches": metrics["sparse_branch_activation_ratio"] <= args.sparse_branch_target,
+        "branch_growth": metrics["branch_growth_events"] >= args.growth_target,
         "moonshot_tree": metrics["tree_branches_per_neuron"] >= args.moonshot_branches,
         "moonshot_branch_sdr": metrics["branch_level_sdr_unique_ratio"] >= args.branch_sdr_target,
         "moonshot_branch_learning": metrics["branch_local_learning_ratio"] >= args.branch_learning_target,
@@ -190,6 +195,7 @@ def parse_args():
     parser.add_argument("--coincidence-target", type=float, default=0.90)
     parser.add_argument("--xor-target", type=float, default=1.0)
     parser.add_argument("--sparse-branch-target", type=float, default=0.05)
+    parser.add_argument("--growth-target", type=float, default=32.0)
     parser.add_argument("--compute-density-target", type=float, default=100.0)
     parser.add_argument("--branch-sdr-target", type=float, default=1.0)
     parser.add_argument("--branch-learning-target", type=float, default=1.0)

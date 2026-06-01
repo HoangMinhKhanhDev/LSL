@@ -24,9 +24,11 @@ import math
 from pathlib import Path
 
 import numpy as np
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
+from .semantic_aliases import ALIAS_TO_GROUP, MULTILINGUAL_CONCEPT_ALIASES
 from .sparse_cooccurrence import build_sparse_cooccurrence, sparse_pmi_embedding, approximate_skipgram_embedding
+from .text_normalization import lexical_key, normalize_text, strip_diacritics, token_variants
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +174,16 @@ class SemanticSDREncoder:
 
         # SDR cache: token_id → binary array(sdr_dim,)
         self._cache: Dict[int, np.ndarray] = {}
+
+    def _canonical_token_key(self, token: str) -> str:
+        return lexical_key(token)
+
+    def _token_family(self, token: str) -> Tuple[str, ...]:
+        return token_variants(token)
+
+    def _group_for_token(self, token: str) -> Optional[str]:
+        key = self._canonical_token_key(token)
+        return ALIAS_TO_GROUP.get(key)
 
     # ------------------------------------------------------------------
     # Training
@@ -367,7 +379,13 @@ class SemanticSDREncoder:
                 seen[key] = int(token_id)
         return collisions / max(1, len(sample_ids))
 
-    def noisy_recall(self, token_id: int, drop_rate: float = 0.4, trials: int = 32) -> float:
+    def noisy_recall(
+        self,
+        token_id: int,
+        drop_rate: float = 0.4,
+        trials: int = 32,
+        candidate_ids: Optional[Sequence[int]] = None,
+    ) -> float:
         rng = np.random.default_rng(int(token_id) + 7)
         token_id = int(token_id) % self.vocab_size
         base = self.encode(token_id)
@@ -375,24 +393,48 @@ class SemanticSDREncoder:
         if len(active) == 0:
             return 0.0
         hits = 0
+        candidates = [int(candidate) % self.vocab_size for candidate in candidate_ids] if candidate_ids is not None else list(range(self.vocab_size))
+        candidate_active = None
+        if candidate_ids is not None:
+            candidate_active = {
+                int(candidate) % self.vocab_size: set(self.active_indices(int(candidate) % self.vocab_size))
+                for candidate in candidates
+            }
         for _ in range(int(trials)):
             keep = max(1, int(round(len(active) * (1.0 - float(drop_rate)))))
             kept = np.sort(rng.choice(active, size=keep, replace=False))
+            kept_set = set(int(bit) for bit in kept.tolist())
             best = None
             best_score = -1
-            for candidate in range(self.vocab_size):
-                score = len(set(kept) & set(self.active_indices(candidate)))
+            for candidate in candidates:
+                if candidate_active is None:
+                    score = len(kept_set & set(self.active_indices(candidate)))
+                else:
+                    score = len(kept_set & candidate_active[candidate])
                 if score > best_score:
                     best_score = score
                     best = candidate
             hits += int(best == token_id)
         return hits / max(1, int(trials))
 
-    def reconstruction_accuracy(self, token_ids: List[int], drop_rates: List[float] = None) -> Dict[str, float]:
+    def reconstruction_accuracy(
+        self,
+        token_ids: List[int],
+        drop_rates: List[float] = None,
+        candidate_ids: Optional[Sequence[int]] = None,
+    ) -> Dict[str, float]:
         drop_rates = drop_rates or [0.2, 0.4, 0.6]
         result = {}
         for drop in drop_rates:
-            accuracies = [self.noisy_recall(int(tid), drop_rate=float(drop), trials=8) for tid in token_ids]
+            accuracies = [
+                self.noisy_recall(
+                    int(tid),
+                    drop_rate=float(drop),
+                    trials=8,
+                    candidate_ids=candidate_ids,
+                )
+                for tid in token_ids
+            ]
             result[f"drop_{int(drop * 100)}"] = float(np.mean(accuracies)) if accuracies else 0.0
         return result
 
@@ -486,6 +528,7 @@ class SemanticSDREncoder:
         dim = int(payload.get("dimension", self.embed_dim))
         basis = payload.get("basis", {})
         groups = payload.get("groups", {})
+        alias_groups = payload.get("aliases", {})
 
         vectors: Dict[str, np.ndarray] = {}
         for name, values in basis.items():
@@ -494,9 +537,25 @@ class SemanticSDREncoder:
                 vec = np.pad(vec, (0, dim - len(vec))).astype(np.float32)
             vectors[name] = vec[:dim]
 
+        word_to_group: Dict[str, str] = {}
+        for source in (MULTILINGUAL_CONCEPT_ALIASES, groups, alias_groups):
+            for group_name, words in source.items():
+                if group_name not in vectors:
+                    continue
+                for word in words:
+                    for variant in token_variants(word):
+                        word_to_group[lexical_key(variant)] = group_name
+
         loaded = 0
-        for group_name, words in groups.items():
-            if group_name not in vectors:
+        for word, index in vocab.items():
+            normalized = lexical_key(word)
+            group_name = word_to_group.get(normalized)
+            if group_name is None:
+                for variant in token_variants(word):
+                    group_name = word_to_group.get(lexical_key(variant))
+                    if group_name is not None:
+                        break
+            if group_name is None or group_name not in vectors:
                 continue
             source = vectors[group_name]
             emb = np.zeros(self.embed_dim, dtype=np.float32)
@@ -504,15 +563,13 @@ class SemanticSDREncoder:
             emb[:n] = source[:n]
             norm = float(np.linalg.norm(emb)) + 1e-9
             emb = emb / norm
-            for word in words:
-                if word in vocab:
-                    seed = sum((i + 1) * ord(ch) for i, ch in enumerate(word))
-                    rng = np.random.default_rng(seed)
-                    jitter = rng.standard_normal(self.embed_dim).astype(np.float32) * 0.22
-                    word_emb = emb + jitter
-                    word_emb /= float(np.linalg.norm(word_emb)) + 1e-9
-                    self._embeddings[int(vocab[word])] = word_emb.astype(np.float32)
-                    loaded += 1
+            seed = sum((i + 1) * ord(ch) for i, ch in enumerate(f"{group_name}:{normalized}:{word}"))
+            rng = np.random.default_rng(seed)
+            jitter = rng.standard_normal(self.embed_dim).astype(np.float32) * 0.16
+            word_emb = emb + jitter
+            word_emb /= float(np.linalg.norm(word_emb)) + 1e-9
+            self._embeddings[int(index)] = word_emb.astype(np.float32)
+            loaded += 1
 
         self._fitted = True
         self._cache.clear()

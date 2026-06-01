@@ -43,15 +43,27 @@ class SimpleWordTokenizer:
         
     def _tokenize_raw(self, text):
         """Split text into lowercase words and punctuation tokens."""
-        text = normalize_text(text, normalize_unicode=True, repair_mojibake=True, lowercase=False)
+        text = normalize_text(
+            text,
+            normalize_unicode=True,
+            compatibility_normalization=True,
+            repair_mojibake=True,
+            lowercase=False,
+        )
         try:
             return list(native_simple_tokenize(text))
         except Exception:
-            text = text.lower()
             return re.findall(r"\w+|[^\w\s]", text, re.UNICODE)
 
     def encode(self, text, max_tokens=None):
         """Encode string text into a list of token IDs."""
+        text = normalize_text(
+            text,
+            normalize_unicode=True,
+            compatibility_normalization=True,
+            repair_mojibake=True,
+            lowercase=False,
+        )
         unk_id = self.word_to_id.get("<UNK>", 1)
         if max_tokens is not None:
             try:
@@ -59,7 +71,7 @@ class SimpleWordTokenizer:
                 return [self.word_to_id.get(tok, unk_id) for tok in tokens]
             except Exception:
                 ids = []
-                for match in re.finditer(r"\w+|[^\w\s]", text.lower(), re.UNICODE):
+                for match in re.finditer(r"\w+|[^\w\s]", text, re.UNICODE):
                     ids.append(self.word_to_id.get(match.group(0), unk_id))
                     if len(ids) >= int(max_tokens):
                         return ids

@@ -17,6 +17,7 @@ def main():
     run("benchmark_pc_phase2.py")
     run("benchmark_cortical_column_sequence.py")
     run("test_lsl_core_model.py")
+    run("test_lsl_curriculum.py")
     run("test_lsl_limitations_improvements.py")
     run("test_phase1_foundation.py")
     run("test_tokenizer_checkpoint_native.py")

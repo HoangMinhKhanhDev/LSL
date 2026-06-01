@@ -260,6 +260,39 @@ def dendrite_predict(
     )
 
 
+def dendrite_predict_candidates(
+    branch_bits: np.ndarray,
+    branch_lengths: np.ndarray,
+    branch_weights: np.ndarray,
+    branch_thresholds: np.ndarray,
+    branch_strengths: np.ndarray,
+    branch_outputs: np.ndarray,
+    active_bits: np.ndarray,
+    candidate_ids: np.ndarray,
+) -> Dict[str, float]:
+    require_native()
+    if not hasattr(_sparse_native, "dendrite_predict_candidates"):
+        return dendrite_predict(
+            branch_bits,
+            branch_lengths,
+            branch_weights,
+            branch_thresholds,
+            branch_strengths,
+            branch_outputs,
+            active_bits,
+        )
+    return _sparse_native.dendrite_predict_candidates(
+        np.asarray(branch_bits, dtype=np.intp),
+        np.asarray(branch_lengths, dtype=np.intp),
+        np.asarray(branch_weights, dtype=np.float32),
+        np.asarray(branch_thresholds, dtype=np.float32),
+        np.asarray(branch_strengths, dtype=np.float32),
+        np.asarray(branch_outputs, dtype=np.intp),
+        np.asarray(active_bits, dtype=np.intp),
+        np.asarray(candidate_ids, dtype=np.intp),
+    )
+
+
 def topk_float32(scores: np.ndarray, k: int) -> Dict[str, object]:
     require_native()
     if not hasattr(_sparse_native, "topk_float32"):

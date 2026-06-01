@@ -8,6 +8,7 @@ turn the comparison into a thresholded pass/fail gate.
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import sys
 import time
@@ -19,7 +20,7 @@ import numpy as np
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from benchmarks.phase5.benchmark_baseline_competition import TrainableTinyTransformerCPU, softmax
-from lsl import DatasetLoader, GenerationController, LSLCoreModel, write_result
+from lsl import DatasetLoader, GenerationController, LSLCoreModel, RUNTIME_PROFILE_CHOICES, write_result
 
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -187,21 +188,23 @@ def context_latency_profile(
     iterations: int,
 ) -> Dict[str, object]:
     rows = []
-    sample = eval_tokens[: max(2, int(iterations) + 1)]
     for length in lengths:
         tf_times = []
+        lsl_times = []
         usable = min(int(iterations), max(1, len(eval_tokens) - int(length) - 1))
         for i in range(usable):
             window = eval_tokens[i:i + int(length)]
             t0 = time.perf_counter_ns()
+            lsl.evaluate_tokens(window, update_context=False)
+            lsl_times.append((time.perf_counter_ns() - t0) / 1000.0)
+            t0 = time.perf_counter_ns()
             transformer.logits(window)
             tf_times.append((time.perf_counter_ns() - t0) / 1000.0)
-        lsl_metrics = lsl.evaluate_tokens(sample, update_context=True)
         rows.append({
             "context": int(length),
-            "lsl_p50_us": float(lsl_metrics["p50_latency_us"]),
+            "lsl_p50_us": p50(lsl_times),
             "transformer_p50_us": p50(tf_times),
-            "speedup": float(p50(tf_times) / max(lsl_metrics["p50_latency_us"], 1e-12)),
+            "speedup": float(p50(tf_times) / max(p50(lsl_times), 1e-12)),
         })
     return {"rows": rows}
 
@@ -307,7 +310,10 @@ def run(args: argparse.Namespace) -> Dict[str, object]:
                 (1_000_000.0 * transformer_train_seconds / max(1, train_cut)) / max(lsl_train["us_per_token"], 1e-12)
             ),
             "train_speedup_transformer_over_lsl": float(
-                (1_000_000.0 * transformer_train_seconds / max(1, train_cut)) / max(lsl_train["us_per_token"], 1e-12)
+                max(lsl_train["us_per_token"], 1e-12) / max(
+                    1_000_000.0 * transformer_train_seconds / max(1, train_cut),
+                    1e-12,
+                )
             ),
             "size_ratio_transformer_over_lsl": float(tf_size / max(1, lsl_size)),
             "latency_energy_proxy_saving": float(1.0 - lsl_eval["p50_latency_us"] / max(tf_eval["p50_latency_us"], 1e-12)),
@@ -351,7 +357,19 @@ def run(args: argparse.Namespace) -> Dict[str, object]:
         "online_adaptation": metrics["online_adaptation"]["works"],
     }
     success = all(checks.values()) if args.claim else True
-    return {"benchmark": "lsl_core_vs_transformer", "success": bool(success), "claim": bool(args.claim), "checks": checks, "metrics": metrics}
+    result = {"benchmark": "lsl_core_vs_transformer", "success": bool(success), "claim": bool(args.claim), "checks": checks, "metrics": metrics}
+    if getattr(args, "json_output", None):
+        output = write_result(
+            result,
+            benchmark="lsl_core_vs_transformer",
+            dataset=args.dataset,
+            seed=args.seed,
+            config=vars(args),
+            output_path=args.json_output,
+            results_root=args.results_root,
+        )
+        result["result_path"] = output
+    return result
 
 
 def parse_args() -> argparse.Namespace:
@@ -372,7 +390,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-tokens", type=int, default=1200)
     parser.add_argument("--vocab-size", type=int, default=4000)
     parser.add_argument("--candidate-cap", type=int, default=128)
-    parser.add_argument("--lsl-profile", choices=["full", "native_long_context", "native_fast", "bio_native"], default="native_fast")
+    parser.add_argument("--lsl-profile", choices=list(RUNTIME_PROFILE_CHOICES), default="native_fast")
     parser.add_argument("--trace-memory", action="store_true", help="enable tracemalloc peak memory measurement during LSL training")
     parser.add_argument("--d-model", type=int, default=96)
     parser.add_argument("--context", type=int, default=32)
@@ -438,16 +456,11 @@ def main() -> int:
     print(f"Prompt: {metrics['generation']['prompt'][:160]}")
     print(f"LSL:    {metrics['generation']['lsl_text'][:260]}")
     print(f"TF:     {metrics['generation']['transformer_text'][:260]}")
-    output = write_result(
-        result,
-        benchmark="lsl_core_vs_transformer",
-        dataset=args.dataset,
-        seed=args.seed,
-        config=vars(args),
-        output_path=args.json_output,
-        results_root=args.results_root,
-    )
-    print(f"Result JSON:              {output}")
+    output = result.get("result_path")
+    if output:
+        print(f"Result JSON:              {output}")
+    else:
+        print("Result JSON:              (not written)")
     return 0 if result["success"] else 1
 
 
